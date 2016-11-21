@@ -36,6 +36,14 @@ struct request {
 	int has_body;
 };
 
+struct response {
+	char http_v[10];
+	int status_no;
+	char status[256];
+	char c_type[256];
+	char c_length[256];
+};
+
 char *
 get_mime(char *path);
 
@@ -281,6 +289,41 @@ write_file(char *path, size_t fsize)
 
 	fclose(file);
 	fclose(connfile);
+}
+
+int
+parse_response(char *response, struct response *r_ptr)
+{
+	printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
+	char *token, *string, *tofree;
+	tofree = string = strdup(response);
+
+	//scan the method and url into the pointer
+	sscanf(response, "%s %d %s\r\n", r_ptr->http_v, &r_ptr->status_no,
+			r_ptr->status);
+
+	//loop through the request line by line (saved to token)
+	while ((token = strsep(&string, "\r\n")) != NULL) {
+		if (strncmp(token, "Content-Type: ", 14) == 0) {
+			char *type = token + 14;
+			strncpy(r_ptr->c_type, type, strlen(token));
+		}
+		else if (strncmp(token, "Content-Length: ", 16) == 0) {
+			char *len = token + 16;
+			strncpy(r_ptr->c_length, len, strlen(token));
+		}
+		else if (strlen(token) == 0) {
+			//we've reached the end of the header, expecting body now
+			break;
+		}
+		//skip over the \n character and break when we reach the end
+		if (strlen(string) <= 2)
+			break;
+		string += 1;
+	}
+	free(tofree);
+
+	return 0;
 }
 
 /*
