@@ -48,7 +48,7 @@ int
 parse_request(char *request, struct request *r_ptr);
 
 void
-handle_request(char *request);
+handle_request(struct request *req);
 
 void
 *get_in_addr(struct sockaddr *sa);
@@ -60,18 +60,6 @@ int connfd;
 char *PORT;
 char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
 static int count = 1;
-
-struct request req; //information about the last request
-
-int
-is_method(char *method)
-{
-	if (strcmp(req.method, method) == 0)
-		return 1;
-	return 0;
-}
-
-
 
 int connect_host(char *hostname)
 {
@@ -113,10 +101,12 @@ void *client_thread(void *arg)
 	printf("we got a file number of %d\n", asdf);
 	int nbytes; //the number of received bytes
 	char buf[MAX_BUF]; //buffer for messages
+	struct request req;
 
 	if ((nbytes = recv(asdf, buf, MAX_BUF, 0)) > 0) {
 		//we received a request!
-		handle_request(buf);
+		parse_request(buf, &req);
+		handle_request(&req);
 	}
 	close(asdf);  //parent doesn't need this
 	return NULL;
@@ -233,18 +223,18 @@ char *mobile_ua = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) Appl
  * Generates a custom request and sends it to the socket at servconn.
  */
 ssize_t
-send_request(int servconn)
+send_request(int servconn, struct request *req)
 {
 	char request[2048];
 
-	char *ua = (is_mobile_spoof) ? mobile_ua : req.useragent;
+	char *ua = (is_mobile_spoof) ? mobile_ua : req->useragent;
 	sprintf(request, "GET %s %s\r\n"
 			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
-			"\r\n", req.path, req.http_v, req.host, ua);
+			"\r\n", req->path, req->http_v, req->host, ua);
 
 	printf("[CLI --- PRX ==> SRV]\n");
-	printf("> GET %s%s\n", req.host, req.path);
+	printf("> GET %s%s\n", req->host, req->path);
 	printf("> %s\n", ua);
 	printf("%s\n", request);
 
@@ -259,12 +249,10 @@ send_request(int servconn)
  * information retrieved from parse_request().
  */
 void
-handle_request(char *request)
+handle_request(struct request *req)
 {
-	parse_request(request, &req);
-
 	//don't worry about non-GET requests
-	if (!is_method("GET")) {
+	if (strcmp(req->method, "GET") != 0) {
 		return;
 	}
 
@@ -272,15 +260,15 @@ handle_request(char *request)
 	printf("%d [X] Redirection [X] Mobile [X] Falsification\n", count);
 	printf("[CLI connected to %s:%s]\n", s, PORT);
 	printf("[CLI ==> PRX --- SRV]\n");
-	printf("> GET %s%s\n", req.host, req.path);
-	printf("> %s\n", req.useragent);
+	printf("> GET %s%s\n", req->host, req->path);
+	printf("> %s\n", req->useragent);
 
 	int servconn;
-	servconn = connect_host(req.host);
+	servconn = connect_host(req->host);
 	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	//if (send(servconn, request, strlen(request), 0) == -1) {
-	if (send_request(servconn) == -1) {
+	if (send_request(servconn, req) == -1) {
 		perror("Error writing to socket");
 	}
 
@@ -400,6 +388,7 @@ main(int argc, char **argv)
 	socklen_t sin_size;
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
+	struct request req;
 
 	//set up the server on the specified port
 	setup_server(&listener, PORT);
@@ -407,6 +396,8 @@ main(int argc, char **argv)
 	printf("Starting proxy server on port %s\n", PORT);
 
 	while(1) {
+		memset(&req, 0, sizeof(req)); //make sure the struct is empty
+
 		sin_size = sizeof(their_addr);
 		//accept()
 		connfd = accept(listener, (struct sockaddr *) &their_addr,
@@ -424,7 +415,8 @@ main(int argc, char **argv)
 
 			if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
 				//we received a request!
-				handle_request(buf);
+				parse_request(buf, &req);
+				handle_request(&req);
 			}
 
 			close(connfd);
