@@ -44,40 +44,11 @@ struct response {
 	char c_length[256];
 };
 
-char *
-get_mime(char *path);
-
-int
-is_alphastring(char *string);
-
-void
-write_response(int sockfd, int statusno, const char *status,
-		const char * restrict format, ...);
-
-void
-write_error(int errno);
-
-void
-write_file(char *path, size_t fsize);
-
-void
-set_cookie_and_redirect(char *cookie, char *site);
-
-
-void
-write_request(int sockfd, const char * restrict format, ...);
-
-void
-unset_cookie();
-
 int
 parse_request(char *request, struct request *r_ptr);
 
 void
 handle_request(char *request);
-
-void
-handle_redirect(char *site);
 
 void
 *get_in_addr(struct sockaddr *sa);
@@ -86,8 +57,6 @@ void
 setup_server(int *listener, char *port);
 
 int connfd;
-char *SECRET = "2016840200"; //secret key for /secret
-char *PASSWORD = "id=yonsei&pw=network"; //password needed in POST
 char *PORT;
 char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
 static int count = 1;
@@ -154,145 +123,6 @@ void *client_thread(void *arg)
 	return NULL;
 }
 
-
-
-
-
-
-
-
-/*
- * Returns the correct MIME type depending on file extention.
- * Returns "application/octet-stream" if file extension is unknown.
- */
-char *
-get_mime(char *path)
-{
-	//grab the file extension
-	char *fext = strrchr(path, '.');
-	if (fext != NULL) {
-		fext += 1; //ignore the '.'
-
-		//supported file types
-		if (strcmp(fext, "html") == 0)
-			return "text/html";
-		if (strcmp(fext, "css") == 0)
-			return "text/css";
-		if (strcmp(fext, "js") == 0)
-			return "text/javascript";
-		if (strcmp(fext, "jpg") == 0)
-			return "image/jpeg";
-		if (strcmp(fext, "png") == 0)
-			return "image/png";
-	}
-
-	//arbitrary data
-	return "application/octet-stream";
-}
-
-/*
- * Returns 1 if <string> is entirely alphabetical and 0 otherwise.
- */
-int
-is_alphastring(char *string)
-{
-	for (int i = 0; i < (int)strlen(string); i++) {
-		if (!isalpha(string[i]))
-			return 0;
-	}
-	return 1;
-}
-
-/*
- * Writes a HTTP response to connfd connection socket, appending any string
- * as additional header/body contents.
- * statusno: the HTTP status number
- * status: the HTTP status
- */
-void
-write_response(int sockfd, int statusno, const char *status, const char * restrict format, ...)
-{
-	FILE *connfile = fdopen(sockfd, "w");
-	fprintf(connfile, "HTTP/1.1 %d %s\r\n", statusno, status);
-	va_list args;
-	va_start(args, format);
-	vfprintf(connfile, format, args);
-	va_end(args);
-	fflush(connfile);
-	fclose(connfile);
-}
-
-void
-write_request(int sockfd, const char * restrict format, ...)
-{
-	FILE *connfile = fdopen(sockfd, "w");
-	va_list args;
-	va_start(args, format);
-	vfprintf(connfile, format, args);
-	printf("The following message was sent:\n<");
-	printf(format, args); //also print it to stdout
-	printf(">\n");
-	va_end(args);
-	fflush(connfile);
-	fclose(connfile);
-}
-
-/*
- * Writes predefined error response to connfd depending on <errno>
- */
-void
-write_error(int errno)
-{
-	switch(errno){
-		case 403:
-			write_response(connfd, 403, "Forbidden",
-					"Content-Type: text/html\r\n"
-					"\r\n"
-					"<html><head><title>Access Forbidden</title></head><body><h1>403 Forbidden</h1><p>You don't have permission to access the requested URL %s. There is either no index document or the directory is read-protected.</p></body></html>", req.url);
-			break;
-		case 404:
-			write_response(connfd, 404, "Not Found",
-					"Content-Type: text/html\r\n"
-					"\r\n"
-					"<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL %s was not found on this server.</p></body></html>", req.url);
-			break;
-		default:
-			fprintf(stderr, "Unrecognised error number <%d>\n", errno);
-			break;
-	}
-}
-
-/*
- * Writes the file of <fsize> bytes at <path> to the connfd socket.
- * Warning! This function does not check for file errors but assumes
- * the file already exists. Check for existence before calling write_file()!
- */
-void
-write_file(char *path, size_t fsize)
-{
-	FILE *file, *connfile;
-	unsigned char bytes_to_send[MAX_BUF];
-	size_t bytes_read;
-
-	file = fopen(path, "r");
-	connfile = fdopen(connfd, "w");
-
-	printf("file size is %ld bytes\n", fsize);
-
-	fprintf(connfile,
-			"HTTP/1.1 200 OK\r\n"
-			"Content-Type: %s\r\n"
-			"Content-Length: %ld\r\n"
-			"\r\n", get_mime(path), fsize);
-	fflush(connfile);
-
-	while ((bytes_read = fread(bytes_to_send, 1, MAX_BUF, file)) > 0) {
-		fwrite(bytes_to_send, 1, bytes_read, connfile);
-	}
-
-	fclose(file);
-	fclose(connfile);
-}
 
 int
 parse_response(char *response, struct response *r_ptr)
@@ -430,7 +260,7 @@ handle_request(char *request)
 
 	char buffer[MAX_BUF];
 
-	int n = send(servconn,request,strlen(request), 0);
+	int n = send(servconn, request, strlen(request), 0);
 	//struct response res;
 
 	if (n < 0)
