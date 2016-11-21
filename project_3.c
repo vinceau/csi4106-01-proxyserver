@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <pthread.h>
 
 #define BACKLOG 10 //how many pending connections the queue will hold
 #define MAX_BUF 1024 //the max size of messages
@@ -27,11 +28,12 @@
 struct request {
 	char method[7];
 	char url[2048];
-	char cookie[256];
+	char http_v[10];
+	char host[2048];
+	char path[2048];
+	char useragent[256];
 	char body[2048];
-	int has_cookie; //0 for no, 1 for yes
 	int has_body;
-	int is_mobile;
 };
 
 char *
@@ -41,7 +43,8 @@ int
 is_alphastring(char *string);
 
 void
-write_response(int statusno, const char *status, const char * restrict format, ...);
+write_response(int sockfd, int statusno, const char *status,
+		const char * restrict format, ...);
 
 void
 write_error(int errno);
@@ -51,6 +54,10 @@ write_file(char *path, size_t fsize);
 
 void
 set_cookie_and_redirect(char *cookie, char *site);
+
+
+void
+write_request(int sockfd, const char * restrict format, ...);
 
 void
 unset_cookie();
@@ -70,11 +77,150 @@ void
 void
 setup_server(int *listener, char *port);
 
-int connfd; //file descriptor of connection socket
-char *ROOT; //root directory for all files
+int connfd;
 char *SECRET = "2016840200"; //secret key for /secret
 char *PASSWORD = "id=yonsei&pw=network"; //password needed in POST
 struct request req; //information about the last request
+
+int
+is_method(char *method)
+{
+	if (strcmp(req.method, method) == 0)
+		return 1;
+	return 0;
+}
+
+
+
+int connect_host(char *hostname)
+{
+	struct hostent *he;
+	struct in_addr **addr_list;
+
+	struct sockaddr_in server;
+	int sockfd;
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		perror("couldn't open socket");
+		exit(1);
+	} else {
+		printf("opened socket");
+	}
+
+	printf("trying to connect to %s\n", hostname);
+	if ((he = gethostbyname(hostname)) == NULL) {
+		perror("Couldn't call gethostbyname()");
+		exit(1);
+	}
+
+	addr_list = (struct in_addr **) he->h_addr_list;
+
+	memcpy(&server.sin_addr, he->h_addr_list[0], he->h_length);
+	server.sin_family = AF_INET;
+	server.sin_port = htons(80);
+
+	if (connect(sockfd, (struct sockaddr *)&server, sizeof(server))) {
+		perror("Couldn't connect socket to client");
+		exit(1);
+	}
+
+	printf("Connected to %s (%s)\n", hostname, inet_ntoa(server.sin_addr));
+
+	return sockfd;
+
+//	int n;
+//
+//    /* send the message line to the server */
+//    n = write(sockfd, request, strlen(request));
+//    if (n < 0) 
+//      perror("ERROR writing to socket");
+//
+//    char buf[MAX_BUF];
+//    /* print the server's reply */
+//    bzero(buf, MAX_BUF);
+//    n = read(sockfd, buf, MAX_BUF);
+//    if (n < 0) 
+//      perror("ERROR reading from socket");
+//    printf("Echo from server: %s", buf);
+//	write_request(asdf, "%s", buf);
+//    close(sockfd);
+
+	/*
+	printf("hostname: %s\n", he->h_name);
+
+	for (int i = 0; he->h_aliases[i] != NULL; i++) {
+		printf("hostname alias %d: %s\n", i, he->h_aliases[i]);
+	}
+	printf("host address type: %d\n", he->h_addrtype);
+	printf("host address length: %d\n", he->h_length);
+	for (int i = 0; he->h_addr_list[i] != NULL; i++) {
+		printf("host address list %d: %s\n", i, he->h_addr_list[i]);
+	}
+
+
+	char sendline[MAX_BUF + 1], recvline[MAX_BUF + 1];
+	char* ptr;
+
+	size_t n;
+
+	printf("lets try to write to the socket\n");
+	/// Write the request
+	if (write(sockfd, request, strlen(sendline))>= 0) {
+		printf("successfully wrote to the socket\n");
+		printf("waiting for response\n");
+		/// Read the response
+		while ((n = read(sockfd, recvline, MAX_BUF)) > 0) 
+		{
+			recvline[n] = '\0';
+
+			if(fputs(recvline,stdout) == EOF) {
+				perror("fputs erros"); 
+			}
+
+			/// Remove the trailing chars
+			ptr = strstr(recvline, "\r\n\r\n");
+
+			// check len for OutResponse here ?
+			//snprintf(OutResponse, MAXRESPONSE,"%s", ptr);
+			printf("%s", recvline);
+		}          
+	}
+	*/
+
+	/*
+	write_request(sockfd, "%s", request);
+
+	int	nbytes;
+	char buf[MAX_BUF];
+	if ((nbytes = recv(sockfd, buf, MAX_BUF, 0)) > 0) {
+		//we received a request!
+		printf("%s", buf);
+	}
+	*/
+
+}
+
+void *client_thread(void *arg)
+{
+	
+	int asdf = *((int*)arg);
+	printf("we got a file number of %d\n", asdf);
+	int nbytes; //the number of received bytes
+	char buf[MAX_BUF]; //buffer for messages
+
+	if ((nbytes = recv(asdf, buf, MAX_BUF, 0)) > 0) {
+		//we received a request!
+		handle_request(buf);
+	}
+	close(asdf);  //parent doesn't need this
+	return NULL;
+}
+
+
+
+
+
+
+
 
 /*
  * Returns the correct MIME type depending on file extention.
@@ -125,13 +271,28 @@ is_alphastring(char *string)
  * status: the HTTP status
  */
 void
-write_response(int statusno, const char *status, const char * restrict format, ...)
+write_response(int sockfd, int statusno, const char *status, const char * restrict format, ...)
 {
-	FILE *connfile = fdopen(connfd, "w");
+	FILE *connfile = fdopen(sockfd, "w");
 	fprintf(connfile, "HTTP/1.1 %d %s\r\n", statusno, status);
 	va_list args;
 	va_start(args, format);
 	vfprintf(connfile, format, args);
+	va_end(args);
+	fflush(connfile);
+	fclose(connfile);
+}
+
+void
+write_request(int sockfd, const char * restrict format, ...)
+{
+	FILE *connfile = fdopen(sockfd, "w");
+	va_list args;
+	va_start(args, format);
+	vfprintf(connfile, format, args);
+	printf("The following message was sent:\n<");
+	printf(format, args); //also print it to stdout
+	printf(">\n");
 	va_end(args);
 	fflush(connfile);
 	fclose(connfile);
@@ -145,13 +306,13 @@ write_error(int errno)
 {
 	switch(errno){
 		case 403:
-			write_response(403, "Forbidden",
+			write_response(connfd, 403, "Forbidden",
 					"Content-Type: text/html\r\n"
 					"\r\n"
 					"<html><head><title>Access Forbidden</title></head><body><h1>403 Forbidden</h1><p>You don't have permission to access the requested URL %s. There is either no index document or the directory is read-protected.</p></body></html>", req.url);
 			break;
 		case 404:
-			write_response(404, "Not Found",
+			write_response(connfd, 404, "Not Found",
 					"Content-Type: text/html\r\n"
 					"\r\n"
 					"<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL %s was not found on this server.</p></body></html>", req.url);
@@ -195,29 +356,6 @@ write_file(char *path, size_t fsize)
 }
 
 /*
- * Sets a cookie that expires in COOKIE_EXP seconds and redirect to
- * the secret page.
- */
-void
-set_cookie_and_redirect(char *cookie, char *site)
-{
-	write_response(302, "Found",
-			"Location: %s\r\n"
-			"Set-Cookie: cookie=%s; path=/; max-age=%d\r\n",
-			site, cookie, COOKIE_EXP);
-}
-
-/*
- * Unsets the cookie we set with set_cookie().
- */
-void
-unset_cookie()
-{
-	write_response(200, "OK",
-			"Set-Cookie: cookie=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n");
-}
-
-/*
  * Reads through the request and extracts any useful information
  * into the pointer to a request structure <r_ptr>.
  * Returns 0 if successful.
@@ -230,26 +368,25 @@ parse_request(char *request, struct request *r_ptr)
 	tofree = string = strdup(request);
 
 	//scan the method and url into the pointer
-	sscanf(request, "%s %s ", r_ptr->method, r_ptr->url);
+	sscanf(request, "%s %s %s\r\n", r_ptr->method, r_ptr->url, r_ptr->http_v);
 
 	//set false as default
-	r_ptr->is_mobile = 0;
-	r_ptr->has_cookie = 0;
 	r_ptr->has_body = 0;
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
-		if (strncmp(token, "User-Agent: ", 12) == 0) {
-			//we're looking at the user agent now
-			if (strstr(token, "Mobile") != NULL) { //we're on mobile
-				r_ptr->is_mobile = 1;
-			}
+		if (strncmp(token, "Host: ", 6) == 0) {
+			char *host = token + 6;
+			strncpy(r_ptr->host, host, strlen(token));
+
+			char *path_offset = strstr(r_ptr->url, host);
+			path_offset+=strlen(host);
+			//printf("path is: %s\n", path_offset);
+			strncpy(r_ptr->path, path_offset, strlen(path_offset));
 		}
-		else if (strncmp(token, "Cookie: ", 8) == 0) {
-			//save the cookie to the pointer
-			char *cookie = token + 8;
-			strncpy(r_ptr->cookie, cookie, strlen(token));
-			r_ptr->has_cookie = 1;
+		else if (strncmp(token, "User-Agent: ", 12) == 0) {
+			char *userag = token + 12;
+			strncpy(r_ptr->useragent, userag, strlen(token));
 		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
@@ -277,92 +414,61 @@ parse_request(char *request, struct request *r_ptr)
 void
 handle_request(char *request)
 {
-	printf("%s\n", request);
 	parse_request(request, &req);
 
-	printf("method: %s\n", req.method);
-	printf("url: %s\n", req.url);
-	printf("cookie: %s\n", req.cookie);
-	printf("body: %s\n", req.body);
-	printf("has_cookie: %d\n", req.has_cookie);
-	printf("has_body: %d\n", req.has_body);
-	printf("is_mobile: %d\n", req.is_mobile);
-
-	char *url = req.url;
-
-	//the only POST request supported is at /login
-	if (strcmp(req.method, "POST") == 0) {
-		//handle the login component
-		if (strcmp(url, "/login") == 0) {
-			//we have the correct password
-			if (req.has_body && strstr(req.body, PASSWORD) != NULL)
-				return set_cookie_and_redirect(SECRET, "/secret/index.html");
-			//the password was wrong so access is still forbidden
-			return write_error(403);
-		}
-		//for all other POST requests return 405 error
-		return write_response(405, "Method Not Allowed", "");
+	//don't worry about non-GET requests
+	if (!is_method("GET")) {
+		return;
 	}
 
-	//filter out all other request methods
-	if (strcmp(req.method, "GET") != 0)
-		return write_response(405, "Method Not Allowed", "");
+	int servconn;
+	servconn = connect_host(req.host);
 
-	//everything else from here on out should be a GET request
-	//handle secret
-	if (strncmp(url, "/secret/", 8) == 0) {
-		if (!req.has_cookie || strstr(req.cookie, SECRET) == NULL)
-			return write_error(403);
-	}
+	printf("REQUEST:\n<\n%s\n>\n", request);
 
+	char buffer[MAX_BUF];
 	/*
-	if (strcmp(url, "/remcookie") == 0)
-		return unset_cookie();
+	write_request(servconn, "%s", request);
+
+	int nbytes;
+	if ((nbytes = recv(servconn, buffer, MAX_BUF, 0)) > 0) {
+		//we received a request!
+		write_request(connfd, "%s", buffer);
+	}
 	*/
 
-	char path[MAX_PATH_LEN];
-	//change root directory to mobile if on mobile
-	char *mob = (req.is_mobile) ? "/mobile" : "";
-	//if we're at a folder, add index.html
-	char *fol = (url[strlen(url)-1] == '/') ? "index.html" : "";
-	sprintf(path, "%s%s%s%s", ROOT, mob, url, fol);
-	printf("file: %s\n", path);
 
-	//let's see if we've got an actual file
-	char newrl[2048]; //new url should we need to redirect
-	struct stat st;
-	stat(path, &st);
-	if (S_ISREG(st.st_mode)) {
-		//we've a normal file, so write it out to the socket
-		return write_file(path, st.st_size);
-	} else if (S_ISDIR(st.st_mode)) {
-		//we've a directory so append a '/' character and try again
-		sprintf(newrl, "%s/", url);
-		return handle_redirect(newrl);
+	int n = send(servconn,request,strlen(request), 0);
+
+	if (n < 0)
+		perror("Error writing to socket");
+	else {
+		do {
+			bzero((char*)buffer,MAX_BUF);
+			n = recv(servconn,buffer,MAX_BUF,0);
+
+			if (!(n<=0))
+				send(connfd,buffer,n,0);
+		} while (n>0);
 	}
 
-	//file not found
-	//test for go requests
-	if (strncmp(url, "/go/", 4) == 0) {
-		char *site = url + 4;
-		if (strlen(site) > 0 && is_alphastring(site)) {
-			sprintf(newrl, "http://www.%s.com/", site);
-			return handle_redirect(newrl);
-		}
+
+	/*
+	write(servconn, "GET /\r\n", strlen("GET /\r\n")); // write(servconn, char[]*, len);  
+	bzero(buffer, MAX_BUF);
+	
+	printf("!!! Server response: \n");
+	while(read(servconn, buffer, MAX_BUF - 1) != 0){
+		printf("%s", buffer);
+		write_error(404);
+		//write_request(connfd, "%s", buffer);
+		//fprintf(stderr, "%s", buffer);
+		bzero(buffer, MAX_BUF);
 	}
+	printf("!!! End server response\n");
+	*/
+	return;
 
-	//if we've made it down here then just return error
-	return write_error(404);
-}
-
-/*
- * Sets HTTP header to redirect to <site>
- */
-void
-handle_redirect(char *site)
-{
-	printf("Redirecting to: %s\n", site);
-	write_response(302, "Found", "Location: %s\r\n", site);
 }
 
 /*
@@ -449,29 +555,29 @@ int
 main(int argc, char **argv)
 {
 	//make sure we have the right number of arguments
-	if (argc != 3) {
+	if (argc != 2) {
 		//remember: the name of the program is the first argument
 		fprintf(stderr, "ERROR: Missing required arguments!\n");
-		printf("Usage: %s <port> <folder>\n", argv[0]);
-		printf("e.g. %s 8080 website\n", argv[0]);
+		printf("Usage: %s <port>\n", argv[0]);
+		printf("e.g. %s 9001\n", argv[0]);
 		exit(1);
 	}
 
 	char *port = argv[1]; //port we're listening on
-	ROOT = argv[2]; //root directory
 
+	//int connfd; //file descriptor of connection socket
 	int listener; //file descriptor of listening socket
 	struct sockaddr_storage their_addr; //connector's address info
 	socklen_t sin_size;
 	char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
-
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
+
 
 	//set up the server on the specified port
 	setup_server(&listener, port);
 
-	printf("SERVER: Listening on port %s for connections...\n", port);
+	printf("Starting proxy server on port %s\n", port);
 
 	while(1) {
 		sin_size = sizeof(their_addr);
@@ -486,6 +592,7 @@ main(int argc, char **argv)
 		inet_ntop(their_addr.ss_family,
 				get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
 
+		printf("---------------------------------------------\n");
 		printf("SERVER: received connection from %s\n", s);
 
 		if (!fork()) { //this is the child process
@@ -500,7 +607,21 @@ main(int argc, char **argv)
 			exit(0);
 		}
 		close(connfd);  //parent doesn't need this
+
+		/*
+		printf("number: %d\n", connfd);
+		pthread_t pth; //thread identifier
+		int *arg = malloc(sizeof(*arg));
+		if (arg == NULL) {
+			fprintf(stderr, "Couldn't allocate memory for thread arg.\n");
+			exit(EXIT_FAILURE);
+		}
+		*arg = connfd;
+		pthread_create(&pth, NULL, client_thread, arg);
+		*/
 	}
+
+	close(listener);
 	return 0;
 }
 
