@@ -89,6 +89,9 @@ int connfd;
 char *SECRET = "2016840200"; //secret key for /secret
 char *PASSWORD = "id=yonsei&pw=network"; //password needed in POST
 char *PORT;
+char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
+static int count = 1;
+
 struct request req; //information about the last request
 
 int
@@ -334,6 +337,7 @@ parse_response(char *response, struct response *r_ptr)
 int
 parse_request(char *request, struct request *r_ptr)
 {
+	//printf("\n\nPARSE REQUEST: <%s>\n\n", request);
 	int in_body = 0; //are we at the request body yet?
 	char *token, *string, *tofree;
 	tofree = string = strdup(request);
@@ -378,6 +382,11 @@ parse_request(char *request, struct request *r_ptr)
 	return 0;
 }
 
+
+
+
+
+
 /*
  * Reads the request and executes the appropriate action depending on
  * information retrieved from parse_request().
@@ -392,6 +401,9 @@ handle_request(char *request)
 		return;
 	}
 
+	printf("-----------------------------------------------\n");
+	printf("%d [X] Redirection [X] Mobile [X] Falsification\n", count);
+	printf("[CLI connected to %s:%s]\n", s, PORT);
 	printf("[CLI ==> PRX --- SRV]\n");
 	printf("  > GET %s%s\n", req.host, req.path);
 	printf("  > %s\n", req.useragent);
@@ -414,23 +426,12 @@ handle_request(char *request)
 		 * */
 
 
-
-
 	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	char buffer[MAX_BUF];
-	/*
-	write_request(servconn, "%s", request);
-
-	int nbytes;
-	if ((nbytes = recv(servconn, buffer, MAX_BUF, 0)) > 0) {
-		//we received a request!
-		write_request(connfd, "%s", buffer);
-	}
-	*/
-
 
 	int n = send(servconn,request,strlen(request), 0);
+	//struct response res;
 
 	if (n < 0)
 		perror("Error writing to socket");
@@ -439,26 +440,16 @@ handle_request(char *request)
 			bzero((char*)buffer,MAX_BUF);
 			n = recv(servconn,buffer,MAX_BUF,0);
 
-			if (!(n<=0))
+			if (!(n<=0)) {
 				send(connfd,buffer,n,0);
+				//parse_response(buffer, &res);
+			}
 		} while (n>0);
 	}
 
+	printf("[CLI disconnected]\n");
+	printf("[SRV disconnected]\n");
 
-	/*
-	write(servconn, "GET /\r\n", strlen("GET /\r\n")); // write(servconn, char[]*, len);  
-	bzero(buffer, MAX_BUF);
-	
-	printf("!!! Server response: \n");
-	while(read(servconn, buffer, MAX_BUF - 1) != 0){
-		printf("%s", buffer);
-		write_error(404);
-		//write_request(connfd, "%s", buffer);
-		//fprintf(stderr, "%s", buffer);
-		bzero(buffer, MAX_BUF);
-	}
-	printf("!!! End server response\n");
-	*/
 	return;
 
 }
@@ -561,11 +552,8 @@ main(int argc, char **argv)
 	int listener; //file descriptor of listening socket
 	struct sockaddr_storage their_addr; //connector's address info
 	socklen_t sin_size;
-	char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
-	static int count = 1;
-
 
 	//set up the server on the specified port
 	setup_server(&listener, PORT);
@@ -585,12 +573,6 @@ main(int argc, char **argv)
 		inet_ntop(their_addr.ss_family,
 				get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
 
-		printf("-----------------------------------------------\n");
-		printf("%d [X] Redirection [X] Mobile [X] Falsification\n", count++);
-
-
-		printf("[CLI connected to %s:%s]\n", s, PORT);
-
 		if (!fork()) { //this is the child process
 			close(listener); //child doesn't need the listener
 
@@ -602,6 +584,7 @@ main(int argc, char **argv)
 			close(connfd);
 			exit(0);
 		}
+		count++;
 		close(connfd);  //parent doesn't need this
 
 		/*
