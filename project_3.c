@@ -102,7 +102,6 @@ int connect_host(char *hostname)
 	}
 
 	printf("[SRV connected to %s:80]\n", hostname);
-	printf("[CLI --- PRX ==> SRV]\n");
 
 	return sockfd;
 }
@@ -125,25 +124,36 @@ void *client_thread(void *arg)
 
 
 int
-parse_response(char *response, struct response *r_ptr)
+parse_response(char *response)
 {
-	printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
+	//printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
 	char *token, *string, *tofree;
 	tofree = string = strdup(response);
+	int worked;
+	char http_v[10];
+	int status_no;
+	char status[256];
+	char c_type[256];
+	char c_length[256];
 
 	//scan the method and url into the pointer
-	sscanf(response, "%s %d %s\r\n", r_ptr->http_v, &r_ptr->status_no,
-			r_ptr->status);
+	worked = sscanf(response, "%s %d %s\r\n", http_v, &status_no, status);
+	
+	if (worked < 3)
+		return 0;
+
+	printf("[CLI --- PRX <== SRV]\n");
+	printf("> %d %s\n", status_no, status);
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Content-Type: ", 14) == 0) {
 			char *type = token + 14;
-			strncpy(r_ptr->c_type, type, strlen(token));
+			strncpy(c_type, type, strlen(token));
 		}
 		else if (strncmp(token, "Content-Length: ", 16) == 0) {
 			char *len = token + 16;
-			strncpy(r_ptr->c_length, len, strlen(token));
+			strncpy(c_length, len, strlen(token));
 		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
@@ -155,6 +165,10 @@ parse_response(char *response, struct response *r_ptr)
 		string += 1;
 	}
 	free(tofree);
+
+	if (strlen(c_type) > 0 && strlen(c_length) > 0) {
+		printf("> %s %sbytes\n", c_type, c_length);
+	}
 
 	return 0;
 }
@@ -212,7 +226,30 @@ parse_request(char *request, struct request *r_ptr)
 	return 0;
 }
 
+int is_mobile_spoof = 0;
+char *mobile_ua = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) AppleWebKit/531.21.10 (KHTML, like Gecko) Mobile/7B405";
 
+/*
+ * Generates a custom request and sends it to the socket at servconn.
+ */
+ssize_t
+send_request(int servconn)
+{
+	char request[2048];
+
+	char *ua = (is_mobile_spoof) ? mobile_ua : req.useragent;
+	sprintf(request, "GET %s %s\r\n"
+			"Host: %s\r\n"
+			"User-Agent: %s\r\n"
+			"\r\n", req.path, req.http_v, req.host, ua);
+
+	printf("[CLI --- PRX ==> SRV]\n");
+	printf("> GET %s%s\n", req.host, req.path);
+	printf("> %s\n", ua);
+	printf("%s\n", request);
+
+	return send(servconn, request, strlen(request), 0);
+}
 
 
 
@@ -235,46 +272,25 @@ handle_request(char *request)
 	printf("%d [X] Redirection [X] Mobile [X] Falsification\n", count);
 	printf("[CLI connected to %s:%s]\n", s, PORT);
 	printf("[CLI ==> PRX --- SRV]\n");
-	printf("  > GET %s%s\n", req.host, req.path);
-	printf("  > %s\n", req.useragent);
+	printf("> GET %s%s\n", req.host, req.path);
+	printf("> %s\n", req.useragent);
 
 	int servconn;
 	servconn = connect_host(req.host);
-		/*
-
-> GET yscec.yonsei.ac.kr/a.js
-> Mozilla/5.0 (Linux; Android 4.4.2; Nexus 4)
-[CLI --- PRX <== SRV]
-> 200 OK
-> application/javascript 3858bytes
-[CLI <== PRX --- SRV]
-> 404 Not Found
-[CLI disconnected]
-[SRV disconnected]
-
-
-		 * */
-
-
 	//printf("REQUEST:\n<\n%s\n>\n", request);
 
-	char buffer[MAX_BUF];
-
-	int n = send(servconn, request, strlen(request), 0);
-	//struct response res;
-
-	if (n < 0)
+	//if (send(servconn, request, strlen(request), 0) == -1) {
+	if (send_request(servconn) == -1) {
 		perror("Error writing to socket");
-	else {
-		do {
-			bzero((char*)buffer,MAX_BUF);
-			n = recv(servconn,buffer,MAX_BUF,0);
+	}
 
-			if (!(n<=0)) {
-				send(connfd,buffer,n,0);
-				//parse_response(buffer, &res);
-			}
-		} while (n>0);
+	char buf[MAX_BUF]; //buffer for messages
+	int nbytes; //the number of received bytes
+
+	while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
+		send(connfd, buf, nbytes, 0);
+	//	printf("%s", buf);
+	//	parse_response(buf);
 	}
 
 	printf("[CLI disconnected]\n");
