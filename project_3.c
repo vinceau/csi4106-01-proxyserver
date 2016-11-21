@@ -80,6 +80,7 @@ setup_server(int *listener, char *port);
 int connfd;
 char *SECRET = "2016840200"; //secret key for /secret
 char *PASSWORD = "id=yonsei&pw=network"; //password needed in POST
+char *PORT;
 struct request req; //information about the last request
 
 int
@@ -102,11 +103,8 @@ int connect_host(char *hostname)
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		perror("couldn't open socket");
 		exit(1);
-	} else {
-		printf("opened socket");
 	}
 
-	printf("trying to connect to %s\n", hostname);
 	if ((he = gethostbyname(hostname)) == NULL) {
 		perror("Couldn't call gethostbyname()");
 		exit(1);
@@ -123,80 +121,10 @@ int connect_host(char *hostname)
 		exit(1);
 	}
 
-	printf("Connected to %s (%s)\n", hostname, inet_ntoa(server.sin_addr));
+	printf("[SRV connected to %s:80]\n", hostname);
+	printf("[CLI --- PRX ==> SRV]\n");
 
 	return sockfd;
-
-//	int n;
-//
-//    /* send the message line to the server */
-//    n = write(sockfd, request, strlen(request));
-//    if (n < 0) 
-//      perror("ERROR writing to socket");
-//
-//    char buf[MAX_BUF];
-//    /* print the server's reply */
-//    bzero(buf, MAX_BUF);
-//    n = read(sockfd, buf, MAX_BUF);
-//    if (n < 0) 
-//      perror("ERROR reading from socket");
-//    printf("Echo from server: %s", buf);
-//	write_request(asdf, "%s", buf);
-//    close(sockfd);
-
-	/*
-	printf("hostname: %s\n", he->h_name);
-
-	for (int i = 0; he->h_aliases[i] != NULL; i++) {
-		printf("hostname alias %d: %s\n", i, he->h_aliases[i]);
-	}
-	printf("host address type: %d\n", he->h_addrtype);
-	printf("host address length: %d\n", he->h_length);
-	for (int i = 0; he->h_addr_list[i] != NULL; i++) {
-		printf("host address list %d: %s\n", i, he->h_addr_list[i]);
-	}
-
-
-	char sendline[MAX_BUF + 1], recvline[MAX_BUF + 1];
-	char* ptr;
-
-	size_t n;
-
-	printf("lets try to write to the socket\n");
-	/// Write the request
-	if (write(sockfd, request, strlen(sendline))>= 0) {
-		printf("successfully wrote to the socket\n");
-		printf("waiting for response\n");
-		/// Read the response
-		while ((n = read(sockfd, recvline, MAX_BUF)) > 0) 
-		{
-			recvline[n] = '\0';
-
-			if(fputs(recvline,stdout) == EOF) {
-				perror("fputs erros"); 
-			}
-
-			/// Remove the trailing chars
-			ptr = strstr(recvline, "\r\n\r\n");
-
-			// check len for OutResponse here ?
-			//snprintf(OutResponse, MAXRESPONSE,"%s", ptr);
-			printf("%s", recvline);
-		}          
-	}
-	*/
-
-	/*
-	write_request(sockfd, "%s", request);
-
-	int	nbytes;
-	char buf[MAX_BUF];
-	if ((nbytes = recv(sockfd, buf, MAX_BUF, 0)) > 0) {
-		//we received a request!
-		printf("%s", buf);
-	}
-	*/
-
 }
 
 void *client_thread(void *arg)
@@ -421,10 +349,31 @@ handle_request(char *request)
 		return;
 	}
 
+	printf("[CLI ==> PRX --- SRV]\n");
+	printf("  > GET %s%s\n", req.host, req.path);
+	printf("  > %s\n", req.useragent);
+
 	int servconn;
 	servconn = connect_host(req.host);
+		/*
 
-	printf("REQUEST:\n<\n%s\n>\n", request);
+> GET yscec.yonsei.ac.kr/a.js
+> Mozilla/5.0 (Linux; Android 4.4.2; Nexus 4)
+[CLI --- PRX <== SRV]
+> 200 OK
+> application/javascript 3858bytes
+[CLI <== PRX --- SRV]
+> 404 Not Found
+[CLI disconnected]
+[SRV disconnected]
+
+
+		 * */
+
+
+
+
+	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	char buffer[MAX_BUF];
 	/*
@@ -563,7 +512,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	char *port = argv[1]; //port we're listening on
+	PORT = argv[1]; //port we're listening on
 
 	//int connfd; //file descriptor of connection socket
 	int listener; //file descriptor of listening socket
@@ -572,12 +521,13 @@ main(int argc, char **argv)
 	char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
+	static int count = 1;
 
 
 	//set up the server on the specified port
-	setup_server(&listener, port);
+	setup_server(&listener, PORT);
 
-	printf("Starting proxy server on port %s\n", port);
+	printf("Starting proxy server on port %s\n", PORT);
 
 	while(1) {
 		sin_size = sizeof(their_addr);
@@ -592,8 +542,11 @@ main(int argc, char **argv)
 		inet_ntop(their_addr.ss_family,
 				get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
 
-		printf("---------------------------------------------\n");
-		printf("SERVER: received connection from %s\n", s);
+		printf("-----------------------------------------------\n");
+		printf("%d [X] Redirection [X] Mobile [X] Falsification\n", count++);
+
+
+		printf("[CLI connected to %s:%s]\n", s, PORT);
 
 		if (!fork()) { //this is the child process
 			close(listener); //child doesn't need the listener
