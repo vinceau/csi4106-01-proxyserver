@@ -32,6 +32,7 @@ struct request {
 	char host[2048];
 	char path[2048];
 	char useragent[256];
+	char connection[256];
 	char body[2048];
 	int has_body;
 };
@@ -42,13 +43,21 @@ struct response {
 	char status[256];
 	char c_type[256];
 	char c_length[256];
+	int has_type;
+	int has_length;
 };
+
+struct modes {
+	int is_mobile;
+	int is_falsify;
+	int is_redirect;
+};
+
+void
+handle_request(struct request req, struct modes m);
 
 int
 parse_request(char *request, struct request *r_ptr);
-
-void
-handle_request(struct request *req);
 
 void
 *get_in_addr(struct sockaddr *sa);
@@ -60,8 +69,28 @@ int connfd;
 char *PORT;
 char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
 static int count = 1;
+//char *mobile_ua = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) AppleWebKit/531.21.10 (KHTML, like Gecko) Mobile/7B405";
+char *mobile_ua = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
 
-int connect_host(char *hostname)
+
+
+void
+check_modes(char *path, struct modes *m)
+{
+	char *ptr;
+	ptr = strrchr(path, '?');
+	if (ptr != NULL) {
+		ptr += 1;
+		if (strcmp(ptr, "start_mobile") == 0)
+			m->is_mobile = 1;
+		else if (strcmp(ptr, "stop_mobile") == 0)
+			m->is_mobile = 0;
+	}
+}
+
+
+int
+connect_host(char *hostname)
 {
 	struct hostent *he;
 	struct in_addr **addr_list;
@@ -102,65 +131,84 @@ void *client_thread(void *arg)
 	int nbytes; //the number of received bytes
 	char buf[MAX_BUF]; //buffer for messages
 	struct request req;
+	struct modes m;
+	m.is_mobile = 0;
+	m.is_redirect = 0;
+	m.is_falsify = 0;
 
-	if ((nbytes = recv(asdf, buf, MAX_BUF, 0)) > 0) {
+	while ((nbytes = recv(asdf, buf, MAX_BUF, 0)) > 0) {
 		//we received a request!
+		printf("%s", buf);
 		parse_request(buf, &req);
-		handle_request(&req);
+		if (strcmp(req.method, "GET") == 0) {
+			handle_request(req, m);
+		}
+		memset(&buf, 0, sizeof(buf));
 	}
 	close(asdf);  //parent doesn't need this
 	return NULL;
 }
 
 
+/*
+ * Returns the length of the header
+ */
 int
-parse_response(char *response)
+parse_response(char *response, struct response *res)
 {
 	//printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
 	char *token, *string, *tofree;
 	tofree = string = strdup(response);
 	int worked;
-	char http_v[10];
-	int status_no;
-	char status[256];
-	char c_type[256];
-	char c_length[256];
+	int found_end = 0;
+	res->has_length = 0;
+	res->has_type = 0;
+	long header_length = 0;
 
 	//scan the method and url into the pointer
-	worked = sscanf(response, "%s %d %s\r\n", http_v, &status_no, status);
+	worked = sscanf(response, "%s %d %s\r\n", res->http_v, &res->status_no, res->status);
 	
 	if (worked < 3)
 		return 0;
 
 	printf("[CLI --- PRX <== SRV]\n");
-	printf("> %d %s\n", status_no, status);
+	printf("> %d %s\n", res->status_no, res->status);
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Content-Type: ", 14) == 0) {
 			char *type = token + 14;
-			strncpy(c_type, type, strlen(token));
+			strncpy(res->c_type, type, strlen(token));
+			res->has_type = 1;
 		}
 		else if (strncmp(token, "Content-Length: ", 16) == 0) {
 			char *len = token + 16;
-			strncpy(c_length, len, strlen(token));
+			strncpy(res->c_length, len, strlen(token));
+			res->has_length = 1;
 		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
+			found_end = 1;
 			break;
 		}
 		//skip over the \n character and break when we reach the end
-		if (strlen(string) <= 2)
+		if (strlen(string) <= 2) {
+			found_end = 1;
 			break;
+		}
 		string += 1;
 	}
+	header_length = strlen(response) - strlen(string) + 1; //plus one for the \n i believe
 	free(tofree);
 
-	if (strlen(c_type) > 0 && strlen(c_length) > 0) {
-		printf("> %s %sbytes\n", c_type, c_length);
+	if (res->has_type && !res->has_length) {
+		printf("> %s\n", res->c_type);
+	}
+	else if (res->has_type && res->has_length) {
+		printf("> %s %sbytes\n", res->c_type, res->c_length);
 	}
 
-	return 0;
+	return header_length;
 }
 
 /*
@@ -197,6 +245,14 @@ parse_request(char *request, struct request *r_ptr)
 			char *userag = token + 12;
 			strncpy(r_ptr->useragent, userag, strlen(token));
 		}
+		else if (strncmp(token, "Proxy-Connection: ", 18) == 0) {
+			char *conn = token + 18;
+			strncpy(r_ptr->connection, conn, strlen(token));
+		}
+		else if (strncmp(token, "Connection: ", 12) == 0) {
+			char *conn = token + 12;
+			strncpy(r_ptr->connection, conn, strlen(token));
+		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
 			in_body = 1;
@@ -216,25 +272,33 @@ parse_request(char *request, struct request *r_ptr)
 	return 0;
 }
 
-int is_mobile_spoof = 0;
-char *mobile_ua = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) AppleWebKit/531.21.10 (KHTML, like Gecko) Mobile/7B405";
-
 /*
  * Generates a custom request and sends it to the socket at servconn.
  */
 ssize_t
-send_request(int servconn, struct request *req)
+send_request(int servconn, struct request req, struct modes m)
 {
+	char connstring[256];
 	char request[2048];
+	char *poop;
 
-	char *ua = (is_mobile_spoof) ? mobile_ua : req->useragent;
+	if (strlen(req.connection) > 0) {
+		sprintf(connstring, "Connection: %s\r\n", req.connection);
+		poop = connstring;
+	} else {
+		poop = "";
+	}
+
+	char *ua = (m.is_mobile) ? mobile_ua : req.useragent;
+
 	sprintf(request, "GET %s %s\r\n"
 			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
-			"\r\n", req->path, req->http_v, req->host, ua);
+			"%s"
+			"\r\n", req.path, req.http_v, req.host, ua, poop);
 
 	printf("[CLI --- PRX ==> SRV]\n");
-	printf("> GET %s%s\n", req->host, req->path);
+	printf("> GET %s%s\n", req.host, req.path);
 	printf("> %s\n", ua);
 	printf("%s\n", request);
 
@@ -249,36 +313,83 @@ send_request(int servconn, struct request *req)
  * information retrieved from parse_request().
  */
 void
-handle_request(struct request *req)
+handle_request(struct request req, struct modes m)
 {
-	//don't worry about non-GET requests
-	if (strcmp(req->method, "GET") != 0) {
-		return;
-	}
-
 	printf("-----------------------------------------------\n");
-	printf("%d [X] Redirection [X] Mobile [X] Falsification\n", count);
+	printf("%d [%s] Redirection [%s] Mobile [%s] Falsification\n", count,
+			m.is_redirect ? "O" : "X",
+			m.is_mobile ? "O" : "X",
+			m.is_falsify ? "O" : "X"
+			);
 	printf("[CLI connected to %s:%s]\n", s, PORT);
 	printf("[CLI ==> PRX --- SRV]\n");
-	printf("> GET %s%s\n", req->host, req->path);
-	printf("> %s\n", req->useragent);
+	printf("> GET %s%s\n", req.host, req.path);
+	printf("> %s\n", req.useragent);
 
 	int servconn;
-	servconn = connect_host(req->host);
+	servconn = connect_host(req.host);
 	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	//if (send(servconn, request, strlen(request), 0) == -1) {
-	if (send_request(servconn, req) == -1) {
+	if (send_request(servconn, req, m) == -1) {
 		perror("Error writing to socket");
 	}
 
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
+	struct response res;
+	long bytes_left;
+	long header_length;
 
-	while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
-		send(connfd, buf, nbytes, 0);
-	//	printf("%s", buf);
-	//	parse_response(buf);
+	nbytes = recv(servconn, buf, MAX_BUF,0);
+	//printf("response <%s>\n", buf);
+	send(connfd, buf, nbytes, 0);
+
+	if (nbytes > 0) {
+		header_length = parse_response(buf, &res);
+
+		if (res.has_length) {
+			//we know exactly how many bytes we're expecting
+
+			bytes_left = atoll(res.c_length);
+			//printf("expecting %ld bytes\n", bytes_left);
+			bytes_left -= (nbytes - header_length);
+
+			printf("[CLI <== PRX --- SRV]\n");
+			printf("> %d %s\n", res.status_no, res.status);
+			if (res.has_type && !res.has_length) {
+				printf("> %s\n", res.c_type);
+			}
+			else if (res.has_type && res.has_length) {
+				printf("> %s %sbytes\n", res.c_type, res.c_length);
+			}
+
+			while (bytes_left > 0) {
+				memset(&buf, 0, sizeof(buf));
+				nbytes = recv(servconn, buf, MAX_BUF,0);
+				//printf("response <%s>\n", buf);
+				send(connfd, buf, nbytes, 0);
+				bytes_left -= nbytes;
+			}
+		}
+
+		else {
+			//we have no idea how many bytes to expect... uh oh
+			memset(&buf, 0, sizeof(buf));
+			while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
+				send(connfd, buf, nbytes, 0);
+				//printf("response <%s>\n", buf);
+
+				int len = strlen(buf);
+				const char *last_five = &buf[len-5];
+				if (strcmp(last_five, "0\r\n\r\n") == 0) {
+					printf("the end\n");
+					break;
+				}
+				memset(&buf, 0, sizeof(buf));
+			}
+		}
+
 	}
 
 	printf("[CLI disconnected]\n");
@@ -389,6 +500,10 @@ main(int argc, char **argv)
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
 	struct request req;
+	struct modes m;
+	m.is_mobile = 0;
+	m.is_redirect = 0;
+	m.is_falsify = 0;
 
 	//set up the server on the specified port
 	setup_server(&listener, PORT);
@@ -397,6 +512,7 @@ main(int argc, char **argv)
 
 	while(1) {
 		memset(&req, 0, sizeof(req)); //make sure the struct is empty
+		memset(&buf, 0, sizeof(buf));
 
 		sin_size = sizeof(their_addr);
 		//accept()
@@ -410,20 +526,27 @@ main(int argc, char **argv)
 		inet_ntop(their_addr.ss_family,
 				get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
 
-		if (!fork()) { //this is the child process
-			close(listener); //child doesn't need the listener
+		//printf("about to call recv WILL BLOCK!!\n");
+		if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
+			//printf("recv resolved\n");
+			//we received a request!
+			parse_request(buf, &req);
 
-			if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
-				//we received a request!
-				parse_request(buf, &req);
-				handle_request(&req);
+			//only process GET requests
+			if (strcmp(req.method, "GET") == 0) {
+				check_modes(req.path, &m);
+
+				if (!fork()) { //this is the child process
+					close(listener); //child doesn't need the listener
+
+					handle_request(req, m);
+					close(connfd);
+					exit(0);
+				}
+				count++;
 			}
-
-			close(connfd);
-			exit(0);
+			close(connfd);  //parent doesn't need this
 		}
-		count++;
-		close(connfd);  //parent doesn't need this
 
 		/*
 		printf("number: %d\n", connfd);
