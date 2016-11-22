@@ -447,6 +447,14 @@ setup_server(int *listener, char *port)
 			continue; 
 		}
 
+		//avoid sigpipe error
+		if (setsockopt(*listener, SOL_SOCKET, SO_NOSIGPIPE, &yes,
+					sizeof(yes)) == -1) {
+			perror("ERROR: setsockopt() failed");
+			exit(1);
+		}
+
+
 		//allow port reuse
 		if (setsockopt(*listener, SOL_SOCKET, SO_REUSEADDR, &yes,
 					sizeof(yes)) == -1) {
