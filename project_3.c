@@ -536,13 +536,13 @@ main(int argc, char **argv)
 			if (strcmp(req.method, "GET") == 0) {
 				check_modes(req.path, &m);
 
-				if (!fork()) { //this is the child process
-					close(listener); //child doesn't need the listener
+//				if (!fork()) { //this is the child process
+//					close(listener); //child doesn't need the listener
 
 					handle_request(req, m);
-					close(connfd);
-					exit(0);
-				}
+					//close(connfd);
+					//exit(0);
+				//}
 				count++;
 			}
 			close(connfd);  //parent doesn't need this
