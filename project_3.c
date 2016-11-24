@@ -118,6 +118,45 @@ check_modes(char *path, struct modes *m)
 	}
 }
 
+/*
+ * Returns 1 if we succesfully falsified, 0 otherwise
+ */
+int
+falsify(int fd, char *colour, char *string, int nbytes)
+{
+	char *ptr;
+	int find_body = 0;
+	int i = 0;
+	ptr = string;
+	for (; i < nbytes - 4; i++) {
+		if (strncmp(ptr, "<body", 5) == 0) {
+			find_body = 1;
+			break;
+		}
+		ptr++;
+	}
+	if (!find_body) { //we reached the end without finding <body
+		send(fd, string, nbytes, 0);
+		return 0; //not found
+	}
+	//we found "<body " so send up til that point
+	i += 5;
+	send(fd, string, i, 0);
+
+	//send the style part
+	char style[64];
+	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", colour);
+	send(fd, style, strlen(style), 0);
+
+	//send the rest
+	ptr += 5;
+	send(fd, ptr, strlen(ptr), 0);
+
+	printf("successfully falsified");
+
+	return 1;
+}
+
 
 int
 connect_host(char *hostname)
@@ -370,13 +409,18 @@ handle_request(struct request req, struct modes m)
 	struct response res;
 	long bytes_left;
 	long header_length;
+	int falsified = !m.is_falsify;
 
 	nbytes = recv(servconn, buf, MAX_BUF,0);
 	//printf("response <%s>\n", buf);
-	send(connfd, buf, nbytes, 0);
 
 	if (nbytes > 0) {
 		header_length = parse_response(buf, &res);
+		if (!falsified && strstr(res.c_type, "text/html") != NULL) {
+			falsified = falsify(connfd, m.colour, buf, nbytes);
+		} else {
+			send(connfd, buf, nbytes, 0);
+		}
 
 		if (res.has_length) {
 			//we know exactly how many bytes we're expecting
@@ -398,7 +442,11 @@ handle_request(struct request req, struct modes m)
 				memset(&buf, 0, sizeof(buf));
 				nbytes = recv(servconn, buf, MAX_BUF,0);
 				//printf("response <%s>\n", buf);
-				send(connfd, buf, nbytes, 0);
+				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
+					falsified = falsify(connfd, m.colour, buf, nbytes);
+				} else {
+					send(connfd, buf, nbytes, 0);
+				}
 				bytes_left -= nbytes;
 			}
 		}
@@ -407,7 +455,11 @@ handle_request(struct request req, struct modes m)
 			//we have no idea how many bytes to expect... uh oh
 			memset(&buf, 0, sizeof(buf));
 			while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
-				send(connfd, buf, nbytes, 0);
+				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
+					falsified = falsify(connfd, m.colour, buf, nbytes);
+				} else {
+					send(connfd, buf, nbytes, 0);
+				}
 				//printf("response <%s>\n", buf);
 
 				int len = strlen(buf);
