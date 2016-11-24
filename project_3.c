@@ -51,6 +51,9 @@ struct modes {
 	int is_mobile;
 	int is_falsify;
 	int is_redirect;
+	char red_host[2048];
+	char red_path[2048];
+	char colour[6];
 };
 
 void
@@ -78,13 +81,40 @@ void
 check_modes(char *path, struct modes *m)
 {
 	char *ptr;
+	char temp[2048];
 	ptr = strrchr(path, '?');
 	if (ptr != NULL) {
 		ptr += 1;
-		if (strcmp(ptr, "start_mobile") == 0)
+		if (strcmp(ptr, "start_mobile") == 0) {
 			m->is_mobile = 1;
-		else if (strcmp(ptr, "stop_mobile") == 0)
+		} else if (strcmp(ptr, "stop_mobile") == 0) {
 			m->is_mobile = 0;
+		} else if (strcmp(ptr, "stop_redirect") == 0) {
+			m->is_redirect = 0;
+		} else if (strcmp(ptr, "stop_falsify") == 0) {
+			m->is_falsify = 0;
+		} else if (sscanf(ptr, "start_redirect=%s", temp) == 1) {
+			char *ptr2;
+			ptr2 = strchr(temp, '/');
+			if (ptr2 != NULL) {
+				strncpy(m->red_path, ptr2, strlen(ptr2));
+				*ptr2 = '\0';
+			} else {
+				strncpy(m->red_path, "/", 1);
+			}
+			strncpy(m->red_host, temp, strlen(temp));
+			m->is_redirect = 1;
+			printf("Will now redirect to: %s%s\n", m->red_host, m->red_path);
+		} else if (sscanf(ptr, "start_falsify=%s", temp) == 1) {
+			strncpy(m->colour, temp, strlen(temp));
+			m->is_falsify = 1;
+			printf("Will now set all colour to: %s\n", temp);
+		} else {
+			//none of the options were achieved so just exit
+			return;
+		}
+		//remove the mode changing from the actual url
+		*(ptr-1) = '\0';
 	}
 }
 
