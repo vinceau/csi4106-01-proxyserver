@@ -26,7 +26,7 @@
 #define COOKIE_EXP 604800 //cookie expiry time in seconds
 
 struct request {
-	char method[7];
+	char method[8];
 	char url[2048];
 	char http_v[10];
 	char host[2048];
@@ -476,7 +476,8 @@ handle_request(struct request req, struct modes m)
 
 	printf("[CLI disconnected]\n");
 	printf("[SRV disconnected]\n");
-
+	close(servconn);
+	close(connfd);
 	return;
 
 }
@@ -627,7 +628,7 @@ main(int argc, char **argv)
 				//}
 				count++;
 			}
-			close(connfd);  //parent doesn't need this
+			//close(connfd);  //parent doesn't need this
 		}
 
 		/*
