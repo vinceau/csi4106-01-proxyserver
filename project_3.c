@@ -68,9 +68,11 @@ void
 void
 setup_server(int *listener, char *port);
 
+char hoststr[NI_MAXHOST];
+char portstr[NI_MAXSERV];
+
 int connfd;
 char *PORT;
-char s[INET6_ADDRSTRLEN]; //the connector's readable IP address
 static int count = 1;
 //char *mobile_ua = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) AppleWebKit/531.21.10 (KHTML, like Gecko) Mobile/7B405";
 char *mobile_ua = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
@@ -390,7 +392,8 @@ handle_request(struct request req, struct modes m)
 			m.is_mobile ? "O" : "X",
 			m.is_falsify ? "O" : "X"
 			);
-	printf("[CLI connected to %s:%s]\n", s, PORT);
+
+	printf("[CLI connected to %s:%s]\n", hoststr, portstr);
 	printf("[CLI ==> PRX --- SRV]\n");
 	printf("> GET %s%s\n", req.host, req.path);
 	printf("> %s\n", req.useragent);
@@ -606,8 +609,10 @@ main(int argc, char **argv)
 			continue;
 		}
 
-		inet_ntop(their_addr.ss_family,
-				get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
+		//store the ip address and port into the hoststr and portstr
+		getnameinfo((struct sockaddr *)&their_addr, sin_size, hoststr,
+				sizeof(hoststr), portstr, sizeof(portstr),
+				NI_NUMERICHOST | NI_NUMERICSERV);
 
 		//printf("about to call recv WILL BLOCK!!\n");
 		if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
