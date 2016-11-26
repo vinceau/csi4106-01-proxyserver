@@ -170,6 +170,20 @@ connect_host(char *hostname)
 		exit(1);
 	}
 
+	int yes = 1;
+
+	//allow port reuse
+	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
+		perror("ERROR: setsockopt() failed");
+		exit(1);
+	}
+
+	if (setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) == -1) {
+		perror("ERROR: setsockopt() failed");
+		exit(1);
+	}
+
+
 	addr_list = (struct in_addr **) he->h_addr_list;
 
 	memcpy(&server.sin_addr, he->h_addr_list[0], he->h_length);
@@ -528,6 +542,12 @@ setup_server(int *listener, char *port)
 
 		//allow port reuse
 		if (setsockopt(*listener, SOL_SOCKET, SO_REUSEADDR, &yes,
+					sizeof(yes)) == -1) {
+			perror("ERROR: setsockopt() failed");
+			exit(1);
+		}
+
+		if (setsockopt(*listener, SOL_SOCKET, SO_NOSIGPIPE, &yes,
 					sizeof(yes)) == -1) {
 			perror("ERROR: setsockopt() failed");
 			exit(1);
