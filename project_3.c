@@ -17,8 +17,6 @@
 
 #define BACKLOG 10 //how many pending connections the queue will hold
 #define MAX_BUF 8192 //the max size of messages
-#define MAX_PATH_LEN 4096 //max size of the file path
-#define COOKIE_EXP 604800 //cookie expiry time in seconds
 
 struct request {
 	char method[8];
@@ -27,9 +25,6 @@ struct request {
 	char host[2048];
 	char path[2048];
 	char useragent[256];
-	char connection[256];
-	char body[2048];
-	int has_body;
 };
 
 struct response {
@@ -139,10 +134,10 @@ falsify(int fd, char *colour, char *string, int nbytes, int *result)
 	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", colour);
 	bytes_sent += write(fd, style, strlen(style));
 
-	//send the rest
-	ptr += 5;
 	*result = 1; //successful
 
+	//send the rest
+	ptr += 5;
 	bytes_sent += write(fd, ptr, strlen(ptr));
 	return bytes_sent;
 }
@@ -153,8 +148,8 @@ connect_host(char *hostname)
 {
 	struct hostent *he;
 	struct in_addr **addr_list;
-
 	struct sockaddr_in server;
+
 	int sockfd;
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		perror("couldn't open socket");
@@ -206,17 +201,16 @@ parse_response(char *response, struct response *res)
 	//printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
 	char *token, *string, *tofree;
 	tofree = string = strdup(response);
-	int worked;
-	int found_end = 0;
+
+	long header_length = 0;
 	res->has_length = 0;
 	res->has_type = 0;
-	long header_length = 0;
 
 	//scan the method and url into the pointer
-	worked = sscanf(response, "%s %d %[^\r\n]\r\n", res->http_v, &res->status_no, res->status);
-	
-	if (worked < 3)
+	if (sscanf(response, "%s %d %[^\r\n]\r\n", res->http_v,
+			&res->status_no, res->status) < 3) {
 		return 0;
+	}
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
@@ -232,17 +226,18 @@ parse_response(char *response, struct response *res)
 		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
-			found_end = 1;
 			break;
 		}
 		//skip over the \n character and break when we reach the end
 		if (strlen(string) <= 2) {
-			found_end = 1;
 			break;
 		}
 		string += 1;
 	}
-	header_length = strlen(response) - strlen(string) + 1; //plus one for the \n i believe
+
+	//calculate header length (the plus one for the \n i believe)
+	header_length = strlen(response) - strlen(string) + 1;
+
 	free(tofree);
 
 	return header_length;
@@ -257,15 +252,11 @@ int
 parse_request(char *request, struct request *r_ptr)
 {
 	//printf("\n\nPARSE REQUEST: <%s>\n\n", request);
-	int in_body = 0; //are we at the request body yet?
 	char *token, *string, *tofree;
 	tofree = string = strdup(request);
 
 	//scan the method and url into the pointer
 	sscanf(request, "%s %s %s\r\n", r_ptr->method, r_ptr->url, r_ptr->http_v);
-
-	//set false as default
-	r_ptr->has_body = 0;
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
@@ -281,22 +272,9 @@ parse_request(char *request, struct request *r_ptr)
 			char *userag = token + 12;
 			strncpy(r_ptr->useragent, userag, strlen(token));
 		}
-		else if (strncmp(token, "Proxy-Connection: ", 18) == 0) {
-			char *conn = token + 18;
-			strncpy(r_ptr->connection, conn, strlen(token));
-		}
-		else if (strncmp(token, "Connection: ", 12) == 0) {
-			char *conn = token + 12;
-			strncpy(r_ptr->connection, conn, strlen(token));
-		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
-			in_body = 1;
-		}
-		else if (in_body == 1) {
-			strncpy(r_ptr->body, token, strlen(token));
-			r_ptr->has_body = 1;
-			break; //there should be nothing after body
+			break;
 		}
 		//skip over the \n character and break when we reach the end
 		if (strlen(string) <= 2)
@@ -362,12 +340,11 @@ handle_request(struct request req, struct modes m)
 	char *host = req.host;
 
 	if (m.is_redirect && strstr(req.host, m.red_host) == NULL) {
-			host = m.red_host;
+		host = m.red_host;
 	}
 
 	servconn = connect_host(host);
 
-	//if (send(servconn, request, strlen(request), 0) == -1) {
 	if (send_request(servconn, req, m) == -1) {
 		perror("Error writing to socket");
 	}
