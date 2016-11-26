@@ -347,28 +347,23 @@ parse_request(char *request, struct request *r_ptr)
 ssize_t
 send_request(int servconn, struct request req, struct modes m)
 {
-	char connstring[256];
 	char request[2048];
-	char *poop;
-
-	if (strlen(req.connection) > 0) {
-		sprintf(connstring, "Connection: %s\r\n", req.connection);
-		poop = connstring;
-	} else {
-		poop = "";
-	}
-
 	char *ua = (m.is_mobile) ? mobile_ua : req.useragent;
-	char *host = (m.is_redirect) ? m.red_host : req.host;
+	char *host = req.host;
+	char *path = req.path;
+
+	if (m.is_redirect && strstr(req.host, m.red_host) == NULL) {
+			host = m.red_host;
+			path = "/";
+	}
 
 	sprintf(request, "GET %s %s\r\n"
 			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
-			"%s"
-			"\r\n", req.path, req.http_v, host, ua, poop);
+			"\r\n", path, req.http_v, host, ua);
 
 	printf("[CLI --- PRX ==> SRV]\n");
-	printf("> GET %s%s\n", host, req.path);
+	printf("> GET %s%s\n", host, path);
 	printf("> %s\n", ua);
 	printf("%s\n", request);
 
@@ -398,7 +393,13 @@ handle_request(struct request req, struct modes m)
 	printf("> %s\n", req.useragent);
 
 	int servconn;
-	servconn = connect_host(m.is_redirect ? m.red_host : req.host);
+	char *host = req.host;
+
+	if (m.is_redirect && strstr(req.host, m.red_host) == NULL) {
+			host = m.red_host;
+	}
+
+	servconn = connect_host(host);
 	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	//if (send(servconn, request, strlen(request), 0) == -1) {
