@@ -643,6 +643,14 @@ main(int argc, char **argv)
 					//exit(0);
 				//}
 				count++;
+			} else {
+				//Return a 403 Forbidden error if they attempt to load
+				//something needing SSL/HTTPS
+				char request[2048];
+				snprintf(request, sizeof(request), "HTTP/1.1 403 Forbidden\r\n"
+						"\r\n");
+				send(connfd, request, strlen(request), 0);
+				close(connfd);
 			}
 			//close(connfd);  //parent doesn't need this
 		}
