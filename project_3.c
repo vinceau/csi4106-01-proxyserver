@@ -128,22 +128,22 @@ falsify(int fd, char *colour, char *string, int nbytes, int *result)
 	}
 	if (!find_body) { //we reached the end without finding <body
 		*result = 0; //not found
-		return send(fd, string, nbytes, 0);
+		return write(fd, string, nbytes);
 	}
 	//we found "<body " so send up til that point
 	i += 5;
-	bytes_sent += send(fd, string, i, 0);
+	bytes_sent += write(fd, string, i);
 
 	//send the style part
 	char style[64];
 	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", colour);
-	bytes_sent += send(fd, style, strlen(style), 0);
+	bytes_sent += write(fd, style, strlen(style));
 
 	//send the rest
 	ptr += 5;
 	*result = 1; //successful
 
-	bytes_sent += send(fd, ptr, strlen(ptr), 0);
+	bytes_sent += write(fd, ptr, strlen(ptr));
 	return bytes_sent;
 }
 
@@ -335,7 +335,7 @@ send_request(int servconn, struct request req, struct modes m)
 	printf("> %s\n", ua);
 	//printf("%s\n", request);
 
-	return send(servconn, request, strlen(request), 0);
+	return write(servconn, request, strlen(request));
 }
 
 
@@ -385,11 +385,12 @@ handle_request(struct request req, struct modes m)
 	bytes_in += nbytes;
 
 	if (nbytes > 0) {
+		struct response res;
 		header_length = parse_response(buf, &res);
 		if (!falsified && strstr(res.c_type, "text/html") != NULL) {
 			bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 		} else {
-			bytes_out += send(connfd, buf, nbytes, 0);
+			bytes_out += write(connfd, buf, nbytes);
 		}
 
 		if (res.has_length) {
@@ -406,7 +407,7 @@ handle_request(struct request req, struct modes m)
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
 					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 				} else {
-					bytes_out += send(connfd, buf, nbytes, 0);
+					bytes_out += write(connfd, buf, nbytes);
 				}
 				bytes_left -= nbytes;
 			}
@@ -420,7 +421,7 @@ handle_request(struct request req, struct modes m)
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
 					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 				} else {
-					bytes_out += send(connfd, buf, nbytes, 0);
+					bytes_out += write(connfd, buf, nbytes);
 				}
 
 				int len = strlen(buf);
@@ -600,7 +601,7 @@ main(int argc, char **argv)
 			} else {
 				//Return a 403 Forbidden error if they attempt to load
 				//something needing SSL/HTTPS
-				send(connfd, ERROR_MSG, strlen(ERROR_MSG), 0);
+				write(connfd, ERROR_MSG, strlen(ERROR_MSG));
 				close(connfd);
 			}
 		}
