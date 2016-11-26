@@ -96,17 +96,9 @@ check_modes(char *path, struct modes *m)
 		} else if (strcmp(ptr, "stop_falsify") == 0) {
 			m->is_falsify = 0;
 		} else if (sscanf(ptr, "start_redirect=%s", temp) == 1) {
-			char *ptr2;
-			ptr2 = strchr(temp, '/');
-			if (ptr2 != NULL) {
-				strncpy(m->red_path, ptr2, strlen(ptr2));
-				*ptr2 = '\0';
-			} else {
-				strncpy(m->red_path, "/", 1);
-			}
 			strncpy(m->red_host, temp, strlen(temp));
 			m->is_redirect = 1;
-			printf("Will now redirect to: %s%s\n", m->red_host, m->red_path);
+			printf("Will now redirect to: %s\n", m->red_host);
 		} else if (sscanf(ptr, "start_falsify=%s", temp) == 1) {
 			strncpy(m->colour, temp, strlen(temp));
 			m->is_falsify = 1;
@@ -361,15 +353,16 @@ send_request(int servconn, struct request req, struct modes m)
 	}
 
 	char *ua = (m.is_mobile) ? mobile_ua : req.useragent;
+	char *host = (m.is_redirect) ? m.red_host : req.host;
 
 	sprintf(request, "GET %s %s\r\n"
 			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
 			"%s"
-			"\r\n", req.path, req.http_v, req.host, ua, poop);
+			"\r\n", req.path, req.http_v, host, ua, poop);
 
 	printf("[CLI --- PRX ==> SRV]\n");
-	printf("> GET %s%s\n", req.host, req.path);
+	printf("> GET %s%s\n", host, req.path);
 	printf("> %s\n", ua);
 	printf("%s\n", request);
 
@@ -399,7 +392,7 @@ handle_request(struct request req, struct modes m)
 	printf("> %s\n", req.useragent);
 
 	int servconn;
-	servconn = connect_host(req.host);
+	servconn = connect_host(m.is_redirect ? m.red_host : req.host);
 	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	//if (send(servconn, request, strlen(request), 0) == -1) {
