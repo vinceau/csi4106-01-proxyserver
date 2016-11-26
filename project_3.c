@@ -357,10 +357,11 @@ send_request(int servconn, struct request req, struct modes m)
 			path = "/";
 	}
 
-	sprintf(request, "GET %s %s\r\n"
+	snprintf(request, sizeof(request),
+			"GET %s HTTP/1.0\r\n"
 			"Host: %s\r\n"
 			"User-Agent: %s\r\n"
-			"\r\n", path, req.http_v, host, ua);
+			"\r\n", path, host, ua);
 
 	printf("[CLI --- PRX ==> SRV]\n");
 	printf("> GET %s%s\n", host, path);
