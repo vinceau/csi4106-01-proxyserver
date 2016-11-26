@@ -113,14 +113,16 @@ check_modes(char *path, struct modes *m)
 }
 
 /*
- * Returns 1 if we succesfully falsified, 0 otherwise
+ * Returns the number of bytes that were sent to <fd>. The result of whether the
+ * falsification occurred or not is saved in <result>.
  */
 int
-falsify(int fd, char *colour, char *string, int nbytes)
+falsify(int fd, char *colour, char *string, int nbytes, int *result)
 {
 	char *ptr;
 	int find_body = 0;
 	int i = 0;
+	int bytes_sent = 0;
 	ptr = string;
 	for (; i < nbytes - 4; i++) {
 		if (strncmp(ptr, "<body", 5) == 0) {
@@ -130,25 +132,25 @@ falsify(int fd, char *colour, char *string, int nbytes)
 		ptr++;
 	}
 	if (!find_body) { //we reached the end without finding <body
-		send(fd, string, nbytes, 0);
-		return 0; //not found
+		*result = 0; //not found
+		return send(fd, string, nbytes, 0);
 	}
 	//we found "<body " so send up til that point
 	i += 5;
-	send(fd, string, i, 0);
+	bytes_sent += send(fd, string, i, 0);
 
 	//send the style part
 	char style[64];
 	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", colour);
-	send(fd, style, strlen(style), 0);
+	bytes_sent += send(fd, style, strlen(style), 0);
 
 	//send the rest
 	ptr += 5;
-	send(fd, ptr, strlen(ptr), 0);
-
+	*result = 1; //successful
 	printf("successfully falsified");
 
-	return 1;
+	bytes_sent += send(fd, ptr, strlen(ptr), 0);
+	return bytes_sent;
 }
 
 
@@ -243,13 +245,10 @@ parse_response(char *response, struct response *res)
 	long header_length = 0;
 
 	//scan the method and url into the pointer
-	worked = sscanf(response, "%s %d %s\r\n", res->http_v, &res->status_no, res->status);
+	worked = sscanf(response, "%s %d %[^\r\n]\r\n", res->http_v, &res->status_no, res->status);
 	
 	if (worked < 3)
 		return 0;
-
-	printf("[CLI --- PRX <== SRV]\n");
-	printf("> %d %s\n", res->status_no, res->status);
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
@@ -277,13 +276,6 @@ parse_response(char *response, struct response *res)
 	}
 	header_length = strlen(response) - strlen(string) + 1; //plus one for the \n i believe
 	free(tofree);
-
-	if (res->has_type && !res->has_length) {
-		printf("> %s\n", res->c_type);
-	}
-	else if (res->has_type && res->has_length) {
-		printf("> %s %sbytes\n", res->c_type, res->c_length);
-	}
 
 	return header_length;
 }
@@ -417,45 +409,40 @@ handle_request(struct request req, struct modes m)
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
 	struct response res;
-	long bytes_left;
+
+	long bytes_in = 0;
+	long bytes_out = 0;
 	long header_length;
 	int falsified = !m.is_falsify;
 
 	nbytes = recv(servconn, buf, MAX_BUF,0);
-	//printf("response <%s>\n", buf);
+	bytes_in += nbytes;
 
 	if (nbytes > 0) {
 		header_length = parse_response(buf, &res);
 		if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-			falsified = falsify(connfd, m.colour, buf, nbytes);
+			bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 		} else {
-			send(connfd, buf, nbytes, 0);
+			bytes_out += send(connfd, buf, nbytes, 0);
 		}
 
 		if (res.has_length) {
 			//we know exactly how many bytes we're expecting
 
+			long bytes_left;
 			bytes_left = atoll(res.c_length);
 			//printf("expecting %ld bytes\n", bytes_left);
 			bytes_left -= (nbytes - header_length);
 
-			printf("[CLI <== PRX --- SRV]\n");
-			printf("> %d %s\n", res.status_no, res.status);
-			if (res.has_type && !res.has_length) {
-				printf("> %s\n", res.c_type);
-			}
-			else if (res.has_type && res.has_length) {
-				printf("> %s %sbytes\n", res.c_type, res.c_length);
-			}
-
 			while (bytes_left > 0) {
 				memset(&buf, 0, sizeof(buf));
 				nbytes = recv(servconn, buf, MAX_BUF,0);
+				bytes_in += nbytes;
 				//printf("response <%s>\n", buf);
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-					falsified = falsify(connfd, m.colour, buf, nbytes);
+					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 				} else {
-					send(connfd, buf, nbytes, 0);
+					bytes_out += send(connfd, buf, nbytes, 0);
 				}
 				bytes_left -= nbytes;
 			}
@@ -465,10 +452,11 @@ handle_request(struct request req, struct modes m)
 			//we have no idea how many bytes to expect... uh oh
 			memset(&buf, 0, sizeof(buf));
 			while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
+				bytes_in += nbytes;
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-					falsified = falsify(connfd, m.colour, buf, nbytes);
+					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 				} else {
-					send(connfd, buf, nbytes, 0);
+					bytes_out += send(connfd, buf, nbytes, 0);
 				}
 				//printf("response <%s>\n", buf);
 
@@ -482,12 +470,21 @@ handle_request(struct request req, struct modes m)
 			}
 		}
 
+	printf("[CLI --- PRX <== SRV]\n");
+	printf("> %d %s\n", res.status_no, res.status);
+	printf("> %s %ldbytes\n", res.c_type, bytes_in);
+
+	printf("[CLI <== PRX --- SRV]\n");
+	printf("> %d %s\n", res.status_no, res.status);
+	printf("> %s %ldbytes\n", res.c_type, bytes_out);
+
 	}
 
 	printf("[CLI disconnected]\n");
-	printf("[SRV disconnected]\n");
-	close(servconn);
 	close(connfd);
+
+	close(servconn);
+	printf("[SRV disconnected]\n");
 	return;
 
 }
@@ -632,6 +629,7 @@ main(int argc, char **argv)
 			//printf("recv resolved\n");
 			//we received a request!
 			parse_request(buf, &req);
+			printf("%s %s\n", req.method, req.url);
 
 			//only process GET requests
 			if (strcmp(req.method, "GET") == 0) {
