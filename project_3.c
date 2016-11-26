@@ -47,10 +47,10 @@ struct modes {
 };
 
 void
-handle_request(struct request req, struct modes m);
+handle_request();
 
 int
-parse_request(char *request, struct request *r_ptr);
+parse_request(char *request);
 
 void
 *get_in_addr(struct sockaddr *sa);
@@ -61,16 +61,17 @@ setup_server(int *listener, char *port);
 char hoststr[NI_MAXHOST];
 char portstr[NI_MAXSERV];
 
-
 int connfd;
 static int count = 1;
+struct request req;
+struct modes m;
 
 char *PORT;
 char *MOBILE_UA = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
 char *ERROR_MSG = "HTTP/1.1 403 Forbidden\r\n\r\n";
 
 void
-check_modes(char *path, struct modes *m)
+check_modes(char *path)
 {
 	char *ptr;
 	char temp[2048];
@@ -78,20 +79,20 @@ check_modes(char *path, struct modes *m)
 	if (ptr != NULL) {
 		ptr += 1;
 		if (strcmp(ptr, "start_mobile") == 0) {
-			m->is_mobile = 1;
+			m.is_mobile = 1;
 		} else if (strcmp(ptr, "stop_mobile") == 0) {
-			m->is_mobile = 0;
+			m.is_mobile = 0;
 		} else if (strcmp(ptr, "stop_redirect") == 0) {
-			m->is_redirect = 0;
+			m.is_redirect = 0;
 		} else if (strcmp(ptr, "stop_falsify") == 0) {
-			m->is_falsify = 0;
+			m.is_falsify = 0;
 		} else if (sscanf(ptr, "start_redirect=%s", temp) == 1) {
-			strncpy(m->red_host, temp, strlen(temp));
-			m->is_redirect = 1;
-			//printf("Will now redirect to: %s\n", m->red_host);
+			strncpy(m.red_host, temp, sizeof(m.red_host));
+			m.is_redirect = 1;
+			//printf("Will now redirect to: %s\n", m.red_host);
 		} else if (sscanf(ptr, "start_falsify=%s", temp) == 1) {
-			strncpy(m->colour, temp, strlen(temp));
-			m->is_falsify = 1;
+			strncpy(m.colour, temp, sizeof(m.colour));
+			m.is_falsify = 1;
 			//printf("Will now set all colour to: %s\n", temp);
 		} else {
 			//none of the options were achieved so just exit
@@ -216,12 +217,12 @@ parse_response(char *response, struct response *res)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Content-Type: ", 14) == 0) {
 			char *type = token + 14;
-			strncpy(res->c_type, type, strlen(token));
+			strncpy(res->c_type, type, sizeof(res->c_type));
 			res->has_type = 1;
 		}
 		else if (strncmp(token, "Content-Length: ", 16) == 0) {
 			char *len = token + 16;
-			strncpy(res->c_length, len, strlen(token));
+			strncpy(res->c_length, len, sizeof(res->c_length));
 			res->has_length = 1;
 		}
 		else if (strlen(token) == 0) {
@@ -249,28 +250,28 @@ parse_response(char *response, struct response *res)
  * Returns 0 if successful.
  */
 int
-parse_request(char *request, struct request *r_ptr)
+parse_request(char *request)
 {
 	//printf("\n\nPARSE REQUEST: <%s>\n\n", request);
 	char *token, *string, *tofree;
 	tofree = string = strdup(request);
 
 	//scan the method and url into the pointer
-	sscanf(request, "%s %s %s\r\n", r_ptr->method, r_ptr->url, r_ptr->http_v);
+	sscanf(request, "%s %s %s\r\n", req.method, req.url, req.http_v);
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Host: ", 6) == 0) {
 			char *host = token + 6;
-			strncpy(r_ptr->host, host, strlen(token));
+			strncpy(req.host, host, sizeof(req.host));
 
-			char *path_offset = strstr(r_ptr->url, host);
+			char *path_offset = strstr(req.url, host);
 			path_offset+=strlen(host);
-			strncpy(r_ptr->path, path_offset, strlen(path_offset));
+			strncpy(req.path, path_offset, sizeof(req.path));
 		}
 		else if (strncmp(token, "User-Agent: ", 12) == 0) {
 			char *userag = token + 12;
-			strncpy(r_ptr->useragent, userag, strlen(token));
+			strncpy(req.useragent, userag, sizeof(req.useragent));
 		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
@@ -290,7 +291,7 @@ parse_request(char *request, struct request *r_ptr)
  * Generates a custom request and sends it to the socket at servconn.
  */
 ssize_t
-send_request(int servconn, struct request req, struct modes m)
+send_request(int servconn)
 {
 	char request[2048];
 	char *ua = (m.is_mobile) ? MOBILE_UA : req.useragent;
@@ -322,7 +323,7 @@ send_request(int servconn, struct request req, struct modes m)
  * information retrieved from parse_request().
  */
 void
-handle_request(struct request req, struct modes m)
+handle_request()
 {
 	printf("-----------------------------------------------\n");
 	printf("%d [%s] Redirection [%s] Mobile [%s] Falsification\n", count,
@@ -345,14 +346,12 @@ handle_request(struct request req, struct modes m)
 
 	servconn = connect_host(host);
 
-	if (send_request(servconn, req, m) == -1) {
+	if (send_request(servconn) == -1) {
 		perror("Error writing to socket");
 	}
 
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
-	struct response res;
-
 	long bytes_in = 0;
 	long bytes_out = 0;
 	long header_length;
@@ -536,11 +535,6 @@ main(int argc, char **argv)
 	socklen_t sin_size;
 	char buf[MAX_BUF]; //buffer for messages
 	int nbytes; //the number of received bytes
-	struct request req;
-	struct modes m;
-	m.is_mobile = 0;
-	m.is_redirect = 0;
-	m.is_falsify = 0;
 
 	//set up the server on the specified port
 	setup_server(&listener, PORT);
@@ -567,13 +561,13 @@ main(int argc, char **argv)
 
 		if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
 			//we received a request!
-			parse_request(buf, &req);
+			parse_request(buf);
 			//printf("%s %s\n", req.method, req.url);
 
 			//only process GET requests
 			if (strcmp(req.method, "GET") == 0) {
-				check_modes(req.path, &m);
-				handle_request(req, m);
+				check_modes(req.path);
+				handle_request();
 				count++;
 			} else {
 				//Return a 403 Forbidden error if they attempt to load
