@@ -18,8 +18,9 @@
 #define BACKLOG 10 //how many pending connections the queue will hold
 #define MAX_BUF 8192 //the max size of messages
 
+
 struct request {
-	char method[8];
+	char method[8]; //http request method
 	char url[2048];
 	char http_v[10];
 	char host[2048];
@@ -31,8 +32,8 @@ struct response {
 	char http_v[10];
 	int status_no;
 	char status[256];
-	char c_type[256];
-	char c_length[256];
+	char c_type[256]; //content type
+	char c_length[256]; //content length
 	int has_type;
 	int has_length;
 };
@@ -46,11 +47,27 @@ struct modes {
 	char colour[6];
 };
 
+
 void
-handle_request();
+check_modes(char *path);
+
+int
+falsify(char *string, int nbytes, int *result);
+
+int
+connect_host(char *hostname);
+
+int
+parse_response(char *response, struct response *res);
 
 int
 parse_request(char *request);
+
+ssize_t
+send_request(int servconn);
+
+void
+handle_request();
 
 void
 *get_in_addr(struct sockaddr *sa);
@@ -58,18 +75,25 @@ void
 void
 setup_server(int *listener, char *port);
 
-char hoststr[NI_MAXHOST];
-char portstr[NI_MAXSERV];
 
-int connfd;
 static int count = 1;
-struct request req;
-struct modes m;
+struct request req; //store the latest request info here
+struct modes m; //the current mode settings
+
+int connfd; //socket of the connected client
+char hoststr[NI_MAXHOST]; //readable client address
+char portstr[NI_MAXSERV]; //readable client port
 
 char *PORT;
 char *MOBILE_UA = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
 char *ERROR_MSG = "HTTP/1.1 403 Forbidden\r\n\r\n";
 
+
+/*
+ * Reads <path> and determines the changing of modes if any. Only works with
+ * one mode change at a time, taking only the last option in path.
+ * Note! <path> is modified to remove the mode option from the path once complete.
+ */
 void
 check_modes(char *path)
 {
@@ -145,7 +169,9 @@ falsify(char *string, int nbytes, int *result)
 	return bytes_sent;
 }
 
-
+/*
+ * Returns a new socket having connected to <hostname> on port 80
+ */
 int
 connect_host(char *hostname)
 {
@@ -189,14 +215,12 @@ connect_host(char *hostname)
 		exit(1);
 	}
 
-	printf("[SRV connected to %s:80]\n", hostname);
-
 	return sockfd;
 }
 
-
 /*
- * Returns the length of the header
+ * Traverses <response> and stores attribute information in <res>.
+ * Returns the length of the response header.
  */
 int
 parse_response(char *response, struct response *res)
@@ -319,10 +343,9 @@ send_request(int servconn)
 	return write(servconn, request, strlen(request));
 }
 
-
 /*
- * Reads the request and executes the appropriate action depending on
- * information retrieved from parse_request().
+ * Actually process the request. Ensures that we actually send and receive all
+ * the required bytes.
  */
 void
 handle_request()
@@ -347,6 +370,7 @@ handle_request()
 	}
 
 	servconn = connect_host(host);
+	printf("[SRV connected to %s:80]\n", host);
 
 	if (send_request(servconn) == -1) {
 		perror("Error writing to socket");
@@ -531,7 +555,6 @@ main(int argc, char **argv)
 
 	PORT = argv[1]; //port we're listening on
 
-	//int connfd; //file descriptor of connection socket
 	int listener; //file descriptor of listening socket
 	struct sockaddr_storage their_addr; //connector's address info
 	socklen_t sin_size;
