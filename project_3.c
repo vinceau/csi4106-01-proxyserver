@@ -104,11 +104,13 @@ check_modes(char *path)
 }
 
 /*
+ * Finds the body tag and adds the style attribute to it, changing the
+ * background colour to whatever is set in the global mode.
  * Returns the number of bytes that were sent to <fd>. The result of whether the
  * falsification occurred or not is saved in <result>.
  */
 int
-falsify(int fd, char *colour, char *string, int nbytes, int *result)
+falsify(char *string, int nbytes, int *result)
 {
 	char *ptr;
 	int find_body = 0;
@@ -124,22 +126,22 @@ falsify(int fd, char *colour, char *string, int nbytes, int *result)
 	}
 	if (!find_body) { //we reached the end without finding <body
 		*result = 0; //not found
-		return write(fd, string, nbytes);
+		return write(connfd, string, nbytes);
 	}
 	//we found "<body " so send up til that point
 	i += 5;
-	bytes_sent += write(fd, string, i);
+	bytes_sent += write(connfd, string, i);
 
 	//send the style part
 	char style[64];
-	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", colour);
-	bytes_sent += write(fd, style, strlen(style));
+	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", m.colour);
+	bytes_sent += write(connfd, style, strlen(style));
 
 	*result = 1; //successful
 
 	//send the rest
 	ptr += 5;
-	bytes_sent += write(fd, ptr, strlen(ptr));
+	bytes_sent += write(connfd, ptr, strlen(ptr));
 	return bytes_sent;
 }
 
@@ -364,7 +366,7 @@ handle_request()
 		struct response res;
 		header_length = parse_response(buf, &res);
 		if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-			bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
+			bytes_out += falsify(buf, nbytes, &falsified);
 		} else {
 			bytes_out += write(connfd, buf, nbytes);
 		}
@@ -381,7 +383,7 @@ handle_request()
 				nbytes = recv(servconn, buf, MAX_BUF,0);
 				bytes_in += nbytes;
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
+					bytes_out += falsify(buf, nbytes, &falsified);
 				} else {
 					bytes_out += write(connfd, buf, nbytes);
 				}
@@ -395,7 +397,7 @@ handle_request()
 			while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
 				bytes_in += nbytes;
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
+					bytes_out += falsify(buf, nbytes, &falsified);
 				} else {
 					bytes_out += write(connfd, buf, nbytes);
 				}
