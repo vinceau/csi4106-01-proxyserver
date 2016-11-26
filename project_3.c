@@ -13,12 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <netdb.h>
-#include <arpa/inet.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <ctype.h>
-#include <stdarg.h>
-#include <pthread.h>
 
 #define BACKLOG 10 //how many pending connections the queue will hold
 #define MAX_BUF 8192 //the max size of messages
@@ -71,13 +66,13 @@ setup_server(int *listener, char *port);
 char hoststr[NI_MAXHOST];
 char portstr[NI_MAXSERV];
 
+
 int connfd;
-char *PORT;
 static int count = 1;
-//char *mobile_ua = "Mozilla/5.0 (iPad; U; CPU OS 3_2_1 like Mac OS X; en-us) AppleWebKit/531.21.10 (KHTML, like Gecko) Mobile/7B405";
-char *mobile_ua = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
 
-
+char *PORT;
+char *MOBILE_UA = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
+char *ERROR_MSG = "HTTP/1.1 403 Forbidden\r\n\r\n";
 
 void
 check_modes(char *path, struct modes *m)
@@ -98,11 +93,11 @@ check_modes(char *path, struct modes *m)
 		} else if (sscanf(ptr, "start_redirect=%s", temp) == 1) {
 			strncpy(m->red_host, temp, strlen(temp));
 			m->is_redirect = 1;
-			printf("Will now redirect to: %s\n", m->red_host);
+			//printf("Will now redirect to: %s\n", m->red_host);
 		} else if (sscanf(ptr, "start_falsify=%s", temp) == 1) {
 			strncpy(m->colour, temp, strlen(temp));
 			m->is_falsify = 1;
-			printf("Will now set all colour to: %s\n", temp);
+			//printf("Will now set all colour to: %s\n", temp);
 		} else {
 			//none of the options were achieved so just exit
 			return;
@@ -147,7 +142,6 @@ falsify(int fd, char *colour, char *string, int nbytes, int *result)
 	//send the rest
 	ptr += 5;
 	*result = 1; //successful
-	printf("successfully falsified");
 
 	bytes_sent += send(fd, ptr, strlen(ptr), 0);
 	return bytes_sent;
@@ -180,11 +174,11 @@ connect_host(char *hostname)
 		exit(1);
 	}
 
+	//don't crash when writing to closed socket
 	if (setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) == -1) {
 		perror("ERROR: setsockopt() failed");
 		exit(1);
 	}
-
 
 	addr_list = (struct in_addr **) he->h_addr_list;
 
@@ -200,32 +194,6 @@ connect_host(char *hostname)
 	printf("[SRV connected to %s:80]\n", hostname);
 
 	return sockfd;
-}
-
-void *client_thread(void *arg)
-{
-	
-	int asdf = *((int*)arg);
-	printf("we got a file number of %d\n", asdf);
-	int nbytes; //the number of received bytes
-	char buf[MAX_BUF]; //buffer for messages
-	struct request req;
-	struct modes m;
-	m.is_mobile = 0;
-	m.is_redirect = 0;
-	m.is_falsify = 0;
-
-	while ((nbytes = recv(asdf, buf, MAX_BUF, 0)) > 0) {
-		//we received a request!
-		printf("%s", buf);
-		parse_request(buf, &req);
-		if (strcmp(req.method, "GET") == 0) {
-			handle_request(req, m);
-		}
-		memset(&buf, 0, sizeof(buf));
-	}
-	close(asdf);  //parent doesn't need this
-	return NULL;
 }
 
 
@@ -307,7 +275,6 @@ parse_request(char *request, struct request *r_ptr)
 
 			char *path_offset = strstr(r_ptr->url, host);
 			path_offset+=strlen(host);
-			//printf("path is: %s\n", path_offset);
 			strncpy(r_ptr->path, path_offset, strlen(path_offset));
 		}
 		else if (strncmp(token, "User-Agent: ", 12) == 0) {
@@ -348,7 +315,7 @@ ssize_t
 send_request(int servconn, struct request req, struct modes m)
 {
 	char request[2048];
-	char *ua = (m.is_mobile) ? mobile_ua : req.useragent;
+	char *ua = (m.is_mobile) ? MOBILE_UA : req.useragent;
 	char *host = req.host;
 	char *path = req.path;
 
@@ -366,12 +333,10 @@ send_request(int servconn, struct request req, struct modes m)
 	printf("[CLI --- PRX ==> SRV]\n");
 	printf("> GET %s%s\n", host, path);
 	printf("> %s\n", ua);
-	printf("%s\n", request);
+	//printf("%s\n", request);
 
 	return send(servconn, request, strlen(request), 0);
 }
-
-
 
 
 /*
@@ -401,7 +366,6 @@ handle_request(struct request req, struct modes m)
 	}
 
 	servconn = connect_host(host);
-	//printf("REQUEST:\n<\n%s\n>\n", request);
 
 	//if (send(servconn, request, strlen(request), 0) == -1) {
 	if (send_request(servconn, req, m) == -1) {
@@ -433,14 +397,12 @@ handle_request(struct request req, struct modes m)
 
 			long bytes_left;
 			bytes_left = atoll(res.c_length);
-			//printf("expecting %ld bytes\n", bytes_left);
 			bytes_left -= (nbytes - header_length);
 
 			while (bytes_left > 0) {
 				memset(&buf, 0, sizeof(buf));
 				nbytes = recv(servconn, buf, MAX_BUF,0);
 				bytes_in += nbytes;
-				//printf("response <%s>\n", buf);
 				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
 					bytes_out += falsify(connfd, m.colour, buf, nbytes, &falsified);
 				} else {
@@ -460,12 +422,10 @@ handle_request(struct request req, struct modes m)
 				} else {
 					bytes_out += send(connfd, buf, nbytes, 0);
 				}
-				//printf("response <%s>\n", buf);
 
 				int len = strlen(buf);
 				const char *last_five = &buf[len-5];
 				if (strcmp(last_five, "0\r\n\r\n") == 0) {
-					printf("the end\n");
 					break;
 				}
 				memset(&buf, 0, sizeof(buf));
@@ -546,6 +506,7 @@ setup_server(int *listener, char *port)
 			exit(1);
 		}
 
+		//don't crash when writing to closed socket
 		if (setsockopt(*listener, SOL_SOCKET, SO_NOSIGPIPE, &yes,
 					sizeof(yes)) == -1) {
 			perror("ERROR: setsockopt() failed");
@@ -609,7 +570,7 @@ main(int argc, char **argv)
 	printf("Starting proxy server on port %s\n", PORT);
 
 	while(1) {
-		memset(&req, 0, sizeof(req)); //make sure the struct is empty
+		memset(&req, 0, sizeof(req));
 		memset(&buf, 0, sizeof(buf));
 
 		sin_size = sizeof(their_addr);
@@ -626,48 +587,23 @@ main(int argc, char **argv)
 				sizeof(hoststr), portstr, sizeof(portstr),
 				NI_NUMERICHOST | NI_NUMERICSERV);
 
-		//printf("about to call recv WILL BLOCK!!\n");
 		if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
-			//printf("recv resolved\n");
 			//we received a request!
 			parse_request(buf, &req);
-			printf("%s %s\n", req.method, req.url);
+			//printf("%s %s\n", req.method, req.url);
 
 			//only process GET requests
 			if (strcmp(req.method, "GET") == 0) {
 				check_modes(req.path, &m);
-
-//				if (!fork()) { //this is the child process
-//					close(listener); //child doesn't need the listener
-
-					handle_request(req, m);
-					//close(connfd);
-					//exit(0);
-				//}
+				handle_request(req, m);
 				count++;
 			} else {
 				//Return a 403 Forbidden error if they attempt to load
 				//something needing SSL/HTTPS
-				char request[2048];
-				snprintf(request, sizeof(request), "HTTP/1.1 403 Forbidden\r\n"
-						"\r\n");
-				send(connfd, request, strlen(request), 0);
+				send(connfd, ERROR_MSG, strlen(ERROR_MSG), 0);
 				close(connfd);
 			}
-			//close(connfd);  //parent doesn't need this
 		}
-
-		/*
-		printf("number: %d\n", connfd);
-		pthread_t pth; //thread identifier
-		int *arg = malloc(sizeof(*arg));
-		if (arg == NULL) {
-			fprintf(stderr, "Couldn't allocate memory for thread arg.\n");
-			exit(EXIT_FAILURE);
-		}
-		*arg = connfd;
-		pthread_create(&pth, NULL, client_thread, arg);
-		*/
 	}
 
 	close(listener);
