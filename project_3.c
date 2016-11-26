@@ -21,7 +21,7 @@
 #include <pthread.h>
 
 #define BACKLOG 10 //how many pending connections the queue will hold
-#define MAX_BUF 65536 //the max size of messages
+#define MAX_BUF 8192 //the max size of messages
 #define MAX_PATH_LEN 4096 //max size of the file path
 #define COOKIE_EXP 604800 //cookie expiry time in seconds
 
