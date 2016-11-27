@@ -77,8 +77,9 @@ setup_server(int *listener, char *port);
 
 
 static int count = 1;
-struct request req; //store the latest request info here
-struct modes m; //the current mode settings
+struct request req; //latest request info
+struct response res; //latest response info
+struct modes m; //current mode settings
 
 int connfd; //socket of the connected client
 char hoststr[NI_MAXHOST]; //readable client address
@@ -136,6 +137,11 @@ check_modes(char *path)
 int
 falsify(char *string, int nbytes, int *status)
 {
+	//if it's already falsified, or it's not a html document just write it
+	if ((!*status && strstr(res.c_type, "text/html") == NULL) || *status) {
+		return write(connfd, string, nbytes);
+	}
+
 	int find_body = 0;
 	int i = 0;
 	int bytes_sent = 0;
@@ -384,13 +390,8 @@ handle_request()
 	bytes_in += nbytes;
 
 	if (nbytes > 0) {
-		struct response res;
 		header_length = parse_response(buf, &res);
-		if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-			bytes_out += falsify(buf, nbytes, &falsified);
-		} else {
-			bytes_out += write(connfd, buf, nbytes);
-		}
+		bytes_out += falsify(buf, nbytes, &falsified);
 
 		if (res.has_length) {
 			//we know exactly how many bytes we're expecting
@@ -401,11 +402,7 @@ handle_request()
 				memset(&buf, 0, sizeof(buf));
 				nbytes = recv(servconn, buf, MAX_BUF,0);
 				bytes_in += nbytes;
-				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-					bytes_out += falsify(buf, nbytes, &falsified);
-				} else {
-					bytes_out += write(connfd, buf, nbytes);
-				}
+				bytes_out += falsify(buf, nbytes, &falsified);
 				bytes_left -= nbytes;
 			}
 		}
@@ -415,11 +412,7 @@ handle_request()
 			memset(&buf, 0, sizeof(buf));
 			while ((nbytes = recv(servconn, buf, MAX_BUF,0)) > 0) {
 				bytes_in += nbytes;
-				if (!falsified && strstr(res.c_type, "text/html") != NULL) {
-					bytes_out += falsify(buf, nbytes, &falsified);
-				} else {
-					bytes_out += write(connfd, buf, nbytes);
-				}
+				bytes_out += falsify(buf, nbytes, &falsified);
 
 				//check the last five characters to see if it's terminated
 				if (strcmp(&buf[nbytes-5], "0\r\n\r\n") == 0) {
