@@ -100,7 +100,7 @@ check_modes(char *path)
 {
 	char *ptr;
 	char temp[2048];
-	ptr = strrchr(path, '?');
+	ptr = strchr(path, '?');
 	if (ptr != NULL) {
 		ptr += 1;
 		if (strcmp(ptr, "start_mobile") == 0) {
