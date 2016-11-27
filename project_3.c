@@ -85,7 +85,7 @@ int connfd; //socket of the connected client
 char hoststr[NI_MAXHOST]; //readable client address
 char portstr[NI_MAXSERV]; //readable client port
 
-char *MOBILE_UA = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
+char *MOBILE_UA = "Mozilla/5.0 (Linux; Android 5.1.1; Nexus 5 Build/LMY48B; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/43.0.2357.65 Mobile Safari/537.36";
 char *ERROR_MSG = "HTTP/1.1 403 Forbidden\r\n\r\n";
 
 
