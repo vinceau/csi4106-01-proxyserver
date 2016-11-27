@@ -85,7 +85,6 @@ int connfd; //socket of the connected client
 char hoststr[NI_MAXHOST]; //readable client address
 char portstr[NI_MAXSERV]; //readable client port
 
-char *PORT;
 char *MOBILE_UA = "Mozilla/5.0 (Linux; Android 7.0; LG-H910 Build/NRD90C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.90 Mobile Safari/537.36";
 char *ERROR_MSG = "HTTP/1.1 403 Forbidden\r\n\r\n";
 
@@ -540,7 +539,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	PORT = argv[1]; //port we're listening on
+	char *port = argv[1]; //port we're listening on
 
 	int listener; //file descriptor of listening socket
 	struct sockaddr_storage their_addr; //connector's address info
@@ -549,9 +548,9 @@ main(int argc, char **argv)
 	int nbytes; //the number of received bytes
 
 	//set up the server on the specified port
-	setup_server(&listener, PORT);
+	setup_server(&listener, port);
 
-	printf("Starting proxy server on port %s\n", PORT);
+	printf("Starting proxy server on port %s\n", port);
 
 	while(1) {
 		memset(&req, 0, sizeof(req));
