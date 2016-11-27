@@ -381,6 +381,7 @@ handle_request()
 
 	if (send_request(servconn) == -1) {
 		perror("Error writing to socket");
+		exit(1);
 	}
 
 	char buf[MAX_BUF]; //buffer for messages
