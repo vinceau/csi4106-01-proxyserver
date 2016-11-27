@@ -58,7 +58,7 @@ int
 connect_host(char *hostname);
 
 int
-parse_response(char *response, struct response *res);
+parse_response(char *response);
 
 int
 parse_request(char *request);
@@ -226,19 +226,19 @@ connect_host(char *hostname)
  * Returns the length of the response header.
  */
 int
-parse_response(char *response, struct response *res)
+parse_response(char *response)
 {
 	//printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
 	char *token, *string, *tofree;
 	tofree = string = strdup(response);
 
 	long header_length = 0;
-	res->has_length = 0;
-	res->has_type = 0;
+	res.has_length = 0;
+	res.has_type = 0;
 
 	//scan the method and url into the pointer
-	if (sscanf(response, "%s %d %[^\r\n]\r\n", res->http_v,
-			&res->status_no, res->status) < 3) {
+	if (sscanf(response, "%s %d %[^\r\n]\r\n", res.http_v,
+			&res.status_no, res.status) < 3) {
 		return 0;
 	}
 
@@ -246,13 +246,13 @@ parse_response(char *response, struct response *res)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Content-Type: ", 14) == 0) {
 			char *type = token + 14;
-			strncpy(res->c_type, type, sizeof(res->c_type));
-			res->has_type = 1;
+			strncpy(res.c_type, type, sizeof(res.c_type));
+			res.has_type = 1;
 		}
 		else if (strncmp(token, "Content-Length: ", 16) == 0) {
 			char *len = token + 16;
-			strncpy(res->c_length, len, sizeof(res->c_length));
-			res->has_length = 1;
+			strncpy(res.c_length, len, sizeof(res.c_length));
+			res.has_length = 1;
 		}
 		else if (strlen(token) == 0) {
 			//we've reached the end of the header, expecting body now
@@ -390,7 +390,7 @@ handle_request()
 	bytes_in += nbytes;
 
 	if (nbytes > 0) {
-		header_length = parse_response(buf, &res);
+		header_length = parse_response(buf);
 		bytes_out += falsify(buf, nbytes, &falsified);
 
 		if (res.has_length) {
