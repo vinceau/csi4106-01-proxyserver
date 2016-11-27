@@ -134,13 +134,12 @@ check_modes(char *path)
  * falsification occurred or not is saved in <result>.
  */
 int
-falsify(char *string, int nbytes, int *result)
+falsify(char *string, int nbytes, int *status)
 {
-	char *ptr;
 	int find_body = 0;
 	int i = 0;
 	int bytes_sent = 0;
-	ptr = string;
+	char *ptr = string;
 	for (; i < nbytes - 4; i++) {
 		if (strncmp(ptr, "<body", 5) == 0) {
 			find_body = 1;
@@ -149,23 +148,21 @@ falsify(char *string, int nbytes, int *result)
 		ptr++;
 	}
 	if (!find_body) { //we reached the end without finding <body
-		*result = 0; //not found
+		*status = 0; //not found
 		return write(connfd, string, nbytes);
 	}
 	//we found "<body " so send up til that point
-	i += 5;
-	bytes_sent += write(connfd, string, i);
+	bytes_sent += write(connfd, string, i+5);
 
 	//send the style part
 	char style[64];
 	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", m.colour);
 	bytes_sent += write(connfd, style, strlen(style));
 
-	*result = 1; //successful
+	*status = 1; //successful
 
 	//send the rest
-	ptr += 5;
-	bytes_sent += write(connfd, ptr, strlen(ptr));
+	bytes_sent += write(connfd, ptr, strlen(ptr+5));
 	return bytes_sent;
 }
 
@@ -397,9 +394,7 @@ handle_request()
 
 		if (res.has_length) {
 			//we know exactly how many bytes we're expecting
-
-			long bytes_left;
-			bytes_left = atoll(res.c_length);
+			long bytes_left = atoll(res.c_length);
 			bytes_left -= (nbytes - header_length);
 
 			while (bytes_left > 0) {
@@ -426,9 +421,8 @@ handle_request()
 					bytes_out += write(connfd, buf, nbytes);
 				}
 
-				int len = strlen(buf);
-				const char *last_five = &buf[len-5];
-				if (strcmp(last_five, "0\r\n\r\n") == 0) {
+				//check the last five characters to see if it's terminated
+				if (strcmp(&buf[nbytes-5], "0\r\n\r\n") == 0) {
 					break;
 				}
 				memset(&buf, 0, sizeof(buf));
