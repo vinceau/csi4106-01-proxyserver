@@ -91,8 +91,9 @@ char *ERROR_MSG = "HTTP/1.1 403 Forbidden\r\n\r\n";
 
 /*
  * Reads <path> and determines the changing of modes if any. Only works with
- * one mode change at a time, taking only the last option in path.
- * Note! <path> is modified to remove the mode option from the path once complete.
+ * one mode change at a time.
+ * Note: <path> is modified to remove the mode option from the path once
+ * complete.
  */
 void
 check_modes(char *path)
@@ -128,16 +129,21 @@ check_modes(char *path)
 }
 
 /*
- * Finds the body tag and adds the style attribute to it, changing the
- * background colour to whatever is set in the global mode.
- * Returns the number of bytes that were sent to <fd>. The result of whether the
- * falsification occurred or not is saved in <result>.
+ * Writes <nbytes> bytes of data from <string> to connfd.
+ *
+ * If the deferenced value of <status> is false and the type of the HTTP
+ * response in <string> is HTML, attempts at falsification will occur where it
+ * looks through <string> to find the body tag and adds the style attribute
+ * to it, changing the background colour to whatever is set in the global
+ * mode.color attribute. If the body tag is found, true is written to <status>.
+ *
+ * Returns the number of bytes that were successfully written to connfd.
  */
 int
 falsify(char *string, int nbytes, int *status)
 {
 	//if it's already falsified, or it's not a html document just write it
-	if ((!*status && strstr(res.c_type, "text/html") == NULL) || *status) {
+	if (*status || (!*status && strstr(res.c_type, "text/html") == NULL)) {
 		return write(connfd, string, nbytes);
 	}
 
@@ -207,7 +213,6 @@ connect_host(char *hostname)
 	}
 
 	addr_list = (struct in_addr **) he->h_addr_list;
-
 	memcpy(&server.sin_addr, he->h_addr_list[0], he->h_length);
 	server.sin_family = AF_INET;
 	server.sin_port = htons(80);
@@ -221,8 +226,8 @@ connect_host(char *hostname)
 }
 
 /*
- * Traverses <response> and stores attribute information in <res>.
- * Returns the length of the response header.
+ * Traverses <response> and stores attribute information in the global
+ * variable <res>. Returns the length of the response header.
  */
 int
 parse_response(char *response)
@@ -327,8 +332,8 @@ send_request(int servconn)
 	char *path = req.path;
 
 	if (m.is_redirect && strstr(req.host, m.red_host) == NULL) {
-			host = m.red_host;
-			path = "/";
+		host = m.red_host;
+		path = "/";
 	}
 
 	snprintf(request, sizeof(request),
@@ -421,13 +426,13 @@ handle_request()
 			}
 		}
 
-	printf("[CLI --- PRX <== SRV]\n");
-	printf("> %d %s\n", res.status_no, res.status);
-	printf("> %s %ldbytes\n", res.c_type, bytes_in);
+		printf("[CLI --- PRX <== SRV]\n");
+		printf("> %d %s\n", res.status_no, res.status);
+		printf("> %s %ldbytes\n", res.c_type, bytes_in);
 
-	printf("[CLI <== PRX --- SRV]\n");
-	printf("> %d %s\n", res.status_no, res.status);
-	printf("> %s %ldbytes\n", res.c_type, bytes_out);
+		printf("[CLI <== PRX --- SRV]\n");
+		printf("> %d %s\n", res.status_no, res.status);
+		printf("> %s %ldbytes\n", res.c_type, bytes_out);
 
 	}
 
