@@ -279,8 +279,8 @@ parse_response(char *response)
 
 /*
  * Reads through the request and extracts any useful information
- * into the pointer to a request structure <r_ptr>.
- * Returns 0 if successful.
+ * into the global struct request <req> variable.
+ * Returns 0 if successful, -1 otherwise.
  */
 int
 parse_request(char *request)
@@ -290,7 +290,10 @@ parse_request(char *request)
 	tofree = string = strdup(request);
 
 	//scan the method and url into the pointer
-	sscanf(request, "%s %s %s\r\n", req.method, req.url, req.http_v);
+	if (sscanf(request, "%s %s %s\r\n", req.method, req.url,
+				req.http_v) < 3) {
+		return -1;
+	}
 
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
@@ -321,7 +324,7 @@ parse_request(char *request)
 }
 
 /*
- * Generates a custom request and sends it to the socket at servconn.
+ * Generates a custom request and sends it to the socket at <servconn>.
  */
 ssize_t
 send_request(int servconn)
@@ -578,11 +581,7 @@ main(int argc, char **argv)
 
 		if ((nbytes = recv(connfd, buf, MAX_BUF, 0)) > 0) {
 			//we received a request!
-			parse_request(buf);
-			//printf("%s %s\n", req.method, req.url);
-
-			//only process GET requests
-			if (strcmp(req.method, "GET") == 0) {
+			if (parse_request(buf) != -1 && strcmp(req.method, "GET") == 0) {
 				check_modes(req.path);
 				handle_request();
 				count++;
