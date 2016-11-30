@@ -170,9 +170,8 @@ falsify(char *string, int nbytes, int *status)
 	snprintf(style, sizeof(style), " style=\"background-color: #%s\"", m.colour);
 	bytes_sent += write(connfd, style, strlen(style));
 
-	*status = 1; //successful
-
-	//send the rest
+	//mark status as successful and send the rest
+	*status = 1;
 	bytes_sent += write(connfd, ptr, strlen(ptr+5));
 	return bytes_sent;
 }
@@ -199,13 +198,11 @@ connect_host(char *hostname)
 	}
 
 	int yes = 1;
-
 	//allow port reuse
 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
 		perror("ERROR: setsockopt() failed");
 		exit(1);
 	}
-
 	//don't crash when writing to closed socket
 	if (setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) == -1) {
 		perror("ERROR: setsockopt() failed");
@@ -233,19 +230,16 @@ int
 parse_response(char *response)
 {
 	//printf("\n\nPARSE RESPONSE: <%s>\n\n", response);
-	char *token, *string, *tofree;
-	tofree = string = strdup(response);
-
-	long header_length = 0;
 	res.has_length = 0;
 	res.has_type = 0;
-
 	//scan the method and url into the pointer
 	if (sscanf(response, "%s %d %[^\r\n]\r\n", res.http_v,
 			&res.status_no, res.status) < 3) {
 		return 0;
 	}
 
+	char *token, *string, *tofree;
+	tofree = string = strdup(response);
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Content-Type: ", 14) == 0) {
@@ -268,12 +262,10 @@ parse_response(char *response)
 		}
 		string += 1;
 	}
-
-	//calculate header length (the plus one for the \n i believe)
-	header_length = strlen(response) - strlen(string) + 1;
-
 	free(tofree);
 
+	//calculate header length (the plus one for the \n i believe)
+	long header_length = strlen(response) - strlen(string) + 1;
 	return header_length;
 }
 
@@ -286,15 +278,14 @@ int
 parse_request(char *request)
 {
 	//printf("\n\nPARSE REQUEST: <%s>\n\n", request);
-	char *token, *string, *tofree;
-	tofree = string = strdup(request);
-
 	//scan the method and url into the pointer
 	if (sscanf(request, "%s %s %s\r\n", req.method, req.url,
 				req.http_v) < 3) {
 		return -1;
 	}
 
+	char *token, *string, *tofree;
+	tofree = string = strdup(request);
 	//loop through the request line by line (saved to token)
 	while ((token = strsep(&string, "\r\n")) != NULL) {
 		if (strncmp(token, "Host: ", 6) == 0) {
@@ -314,8 +305,9 @@ parse_request(char *request)
 			break;
 		}
 		//skip over the \n character and break when we reach the end
-		if (strlen(string) <= 2)
+		if (strlen(string) <= 2) {
 			break;
+		}
 		string += 1;
 	}
 	free(tofree);
@@ -361,7 +353,7 @@ void
 handle_request()
 {
 	printf("-----------------------------------------------\n");
-	printf("%d [%s] Redirection [%s] Mobile [%s] Falsification\n", count,
+	printf("%d [%s] Redirection [%s] Mobile [%s] Falsification\n", count++,
 			m.is_redirect ? "O" : "X",
 			m.is_mobile ? "O" : "X",
 			m.is_falsify ? "O" : "X"
@@ -372,16 +364,13 @@ handle_request()
 	printf("> GET %s%s\n", req.host, req.path);
 	printf("> %s\n", req.useragent);
 
-	int servconn;
 	char *host = req.host;
-
 	if (m.is_redirect && strstr(req.host, m.red_host) == NULL) {
 		host = m.red_host;
 	}
 
-	servconn = connect_host(host);
+	int servconn = connect_host(host);
 	printf("[SRV connected to %s:80]\n", host);
-
 	if (send_request(servconn) == -1) {
 		perror("Error writing to socket");
 		exit(1);
@@ -414,7 +403,6 @@ handle_request()
 				bytes_left -= nbytes;
 			}
 		}
-
 		else {
 			//we have no idea how many bytes to expect... uh oh
 			memset(&buf, 0, sizeof(buf));
@@ -429,7 +417,6 @@ handle_request()
 				memset(&buf, 0, sizeof(buf));
 			}
 		}
-
 		printf("[CLI --- PRX <== SRV]\n");
 		printf("> %d %s\n", res.status_no, res.status);
 		printf("> %s %ldbytes\n", res.c_type, bytes_in);
@@ -437,16 +424,13 @@ handle_request()
 		printf("[CLI <== PRX --- SRV]\n");
 		printf("> %d %s\n", res.status_no, res.status);
 		printf("> %s %ldbytes\n", res.c_type, bytes_out);
-
 	}
-
-	printf("[CLI disconnected]\n");
 	close(connfd);
+	printf("[CLI disconnected]\n");
 
 	close(servconn);
 	printf("[SRV disconnected]\n");
 	return;
-
 }
 
 /*
@@ -471,7 +455,6 @@ void
 setup_server(int *listener, char *port)
 {
 	//set up the structs we need
-	int status;
 	struct addrinfo hints, *p;
 	struct addrinfo *servinfo; //will point to the results
 
@@ -480,6 +463,7 @@ setup_server(int *listener, char *port)
 	hints.ai_socktype = SOCK_STREAM; //TCP stream sockets
 	hints.ai_flags = AI_PASSIVE; //fill in my IP for me
 
+	int status;
 	if ((status = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
 		exit(1);
@@ -549,7 +533,6 @@ main(int argc, char **argv)
 	}
 
 	char *port = argv[1]; //port we're listening on
-
 	int listener; //file descriptor of listening socket
 	struct sockaddr_storage their_addr; //connector's address info
 	socklen_t sin_size;
@@ -566,7 +549,6 @@ main(int argc, char **argv)
 		memset(&buf, 0, sizeof(buf));
 
 		sin_size = sizeof(their_addr);
-		//accept()
 		connfd = accept(listener, (struct sockaddr *) &their_addr,
 				&sin_size);
 		if (connfd == -1) {
@@ -584,7 +566,6 @@ main(int argc, char **argv)
 			if (parse_request(buf) != -1 && strcmp(req.method, "GET") == 0) {
 				check_modes(req.path);
 				handle_request();
-				count++;
 			} else {
 				//Return a 403 Forbidden error if they attempt to load
 				//something needing SSL/HTTPS
@@ -593,7 +574,6 @@ main(int argc, char **argv)
 			}
 		}
 	}
-
 	close(listener);
 	return 0;
 }
